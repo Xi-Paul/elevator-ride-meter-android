@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#151b25">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="mobile-web-app-capable" content="yes">
+<title>승강기 주행 계측</title>
+<style>
+  :root{
+    --bg:#151b25; --panel:#1d2532; --line:#2b3648; --ink:#e8edf5; --dim:#8d9ab0;
+    --acc:#f2b33d; --vel:#5cc8ff; --jrk:#ff7d6e; --ok:#63d39a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;-webkit-user-select:none;user-select:none}
+  body{padding:env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 14px);max-width:520px;margin:0 auto;display:flex;flex-direction:column;min-height:100dvh;gap:10px}
+  header{display:flex;align-items:baseline;justify-content:space-between;padding-top:12px}
+  header h1{font-size:17px;font-weight:600;margin:0;letter-spacing:-.01em}
+  header span{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--panel);border-radius:10px;padding:4px;gap:4px}
+  .tab{border:0;border-radius:7px;padding:9px;font-size:15px;font-weight:600;background:transparent;color:var(--dim);font-family:inherit}
+  .tab.on{background:var(--ink);color:var(--bg)}
+  .trials{display:flex;gap:6px;align-items:center}
+  .trials .chip{flex:1;border:1px solid var(--line);background:var(--panel);color:var(--dim);border-radius:8px;padding:8px 0;font-size:14px;font-weight:600;display:flex;justify-content:center;gap:6px;align-items:center}
+  .trials .chip.on{border-color:var(--acc);color:var(--ink)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--line)}
+  .dot.has{background:var(--ok)} .dot.rec{background:var(--jrk)}
+  .trials select{padding:6px 4px;font-size:12px}
+  .readouts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .ro{background:var(--panel);border-radius:10px;padding:10px 10px 8px;border-top:3px solid var(--c)}
+  .ro .k{font-size:12px;color:var(--dim)}
+  .ro .v{font-size:28px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px;color:var(--c)}
+  .ro .u{font-size:11px;color:var(--dim)}
+  .ro .p{font-size:12px;color:var(--ink);margin-top:5px;font-variant-numeric:tabular-nums;line-height:1.5}
+  .ro .p em{font-style:normal;color:var(--dim)}
+  canvas{width:100%;height:220px;background:var(--panel);border-radius:10px;display:block}
+  .legend{display:flex;gap:12px;font-size:12px;color:var(--dim);padding:0 4px;align-items:center}
+  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  .legend .spacer{flex:1}
+  .lg{border:0;background:transparent;color:var(--dim);font-size:12px;padding:4px 6px;border-radius:6px;font-family:inherit;font-weight:500;opacity:.4}
+  .lg.on{opacity:1;color:var(--ink)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg button{border:0;background:transparent;color:var(--dim);padding:5px 9px;font-size:12px;font-weight:500}
+  .seg button.on{background:var(--line);color:var(--ink)}
+  .stats{background:var(--panel);border-radius:10px;padding:10px 12px;font-size:13px;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-variant-numeric:tabular-nums}
+  .stats b{font-weight:500;color:var(--dim)}
+  #peaks{grid-column:1/-1;display:none;padding-top:4px;border-top:1px solid var(--line);margin-top:2px}
+  #peaks span{display:inline-block;margin-right:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row label{font-size:12px;color:var(--dim)}
+  select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px;font-family:inherit}
+  .spacer{flex:1}
+  details{background:var(--panel);border-radius:10px;padding:8px 12px;font-size:12px}
+  summary{cursor:pointer;color:var(--dim);font-weight:500}
+  table{width:100%;border-collapse:collapse;margin-top:6px;font-variant-numeric:tabular-nums}
+  th,td{text-align:right;padding:4px 2px;border-top:1px solid var(--line);white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:11px}
+  td:first-child,th:first-child{text-align:left}
+  .btns{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:auto}
+  #msg{order:0}
+  /* 측정 중: 설정·부가 UI를 감추고 수치와 그래프만 남긴다 */
+  body.rec .tabs, body.rec .trials, body.rec .legend, body.rec .row,
+  body.rec details, body.rec .btns, body.rec button.mic { display:none }
+  body.rec .ro{padding:16px 12px 12px}
+  body.rec .ro .v{font-size:42px}
+  body.rec .ro .k{font-size:13px}
+  body.rec .ro .p{font-size:13px}
+  body.rec canvas{height:280px}
+  body.rec #msg{font-size:14px}
+  body.rec .stats{font-size:14px}
+  body.rec button.main{padding:22px;font-size:19px}
+  body.rec header h1{font-size:15px}
+  body.rec header span{font-size:14px;color:var(--ink);font-weight:600}
+  /* 측정 중 가로 화면: 수치는 왼쪽 한 줄, 파형이 남는 폭과 높이를 모두 차지 */
+  @media (orientation: landscape) {
+    /* 자동 배치에 맡기면 DOM 순서상 버튼줄이 그래프 칸과 겹쳐 잘린다 → 행·열을 모두 명시 */
+    body.rec{height:100dvh;overflow:hidden;display:grid;gap:8px;
+      grid-template-columns:190px 1fr;grid-template-rows:auto auto minmax(0,1fr) auto}
+    body.rec header{grid-column:1/-1;grid-row:1;padding-top:4px}
+    body.rec .gorow{grid-column:1/-1;grid-row:2}
+    body.rec .readouts{grid-column:1;grid-row:3;grid-template-columns:1fr;align-content:start;gap:6px;min-height:0;overflow:hidden}
+    body.rec canvas{grid-column:2;grid-row:3;height:100%;min-height:0}
+    body.rec #msg{grid-column:1/-1;grid-row:4;min-height:0}
+    body.rec .stats{display:none}
+    body.rec .ro{padding:6px 10px 5px}
+    body.rec .ro .v{font-size:26px}
+    body.rec .ro .k{font-size:11px}
+    body.rec .ro .u{display:none}
+    body.rec .ro .p{font-size:11px;margin-top:2px}
+    body.rec button.main{padding:12px;font-size:17px}
+    body.rec button.abort{padding:8px 6px;font-size:12px;width:88px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>승강기 주행 계측</h1>
+  <span id="fs">— Hz</span>
+</header>
+
+<div id="upd" style="display:none;background:var(--ok);color:var(--bg);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;align-items:center;gap:8px"><span id="updTxt">새 버전이 있습니다</span><button id="updBtn" style="margin-left:auto;padding:8px 12px;border-radius:8px;background:var(--bg);color:var(--ok);font-size:13px">지금 적용</button></div>
+<div class="tabs">
+  <button class="tab on" data-dir="up">상승</button>
+  <button class="tab" data-dir="down">하강</button>
+</div>
+<div class="trials" id="trials"></div>
+<div class="gorow">
+  <button class="main" id="go">시작</button>
+  <button class="mic" id="mic">🎤 음성 꺼짐</button>
+  <button class="abort" id="abort">취소<br>(폐기)</button>
+</div>
+<div id="msg"></div>
+<div class="row" style="gap:6px">
+  <label for="axis">표시 축</label>
+  <select id="axis" style="flex:1"><option value="v" selected>수직 (가속도·속도·저크)</option><option value="x">수평 전후 (진동)</option><option value="y">수평 좌우 (진동)</option></select>
+  <label style="white-space:nowrap"><input type="checkbox" id="autodir" checked> 방향 자동</label>
+  <label style="white-space:nowrap"><input type="checkbox" id="landscape"> 측정 시 가로 고정</label>
+</div>
+<div class="row" style="gap:6px">
+  <label style="white-space:nowrap"><input type="checkbox" id="noise"> 소음 측정</label>
+  <label for="ncal">보정</label>
+  <input id="ncal" type="number" step="0.1" value="0" style="width:72px;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px;font-size:13px">
+  <span style="font-size:11px;color:var(--dim)">dB 오프셋 (0 = 미보정, dBFS 표기)</span>
+</div>
+
+<div class="readouts">
+  <div class="ro" style="--c:var(--acc)"><div class="k" id="k1">가속도</div><div class="v" id="a">0.00</div><div class="u" id="u1">m/s²</div><div class="p"><em>max</em> <span id="amax">0.00</span><br><em>min</em> <span id="amin">0.00</span></div></div>
+  <div class="ro" style="--c:var(--vel)"><div class="k" id="k2">속도</div><div class="v" id="v">0.00</div><div class="u" id="u2">m/s</div><div class="p"><em>max</em> <span id="vmax">0.00</span><br><em>min</em> <span id="vmin">0.00</span></div></div>
+  <div class="ro" style="--c:var(--jrk)"><div class="k" id="k3">저크</div><div class="v" id="j">0.00</div><div class="u" id="u3">m/s³</div><div class="p"><em>max</em> <span id="jmax">0.00</span><br><em>min</em> <span id="jmin">0.00</span></div></div>
+</div>
+
+<canvas id="cv"></canvas>
+<div class="legend">
+  <span id="lg-time"><button class="lg on" data-tr="a"><i style="background:var(--acc)"></i>가속도</button><button class="lg on" data-tr="v"><i style="background:var(--vel)"></i>속도</button><button class="lg on" data-tr="j"><i style="background:var(--jrk)"></i>저크</button><button class="lg" data-tr="x"><i style="background:#9b8cff"></i>전후</button><button class="lg" data-tr="y"><i style="background:#63d39a"></i>좌우</button><button class="lg" data-tr="ar"><i style="background:#8d9ab0"></i>원시</button></span>
+  <span id="lg-fft" style="display:none"><i style="background:var(--acc)"></i>원시 가속도 스펙트럼</span>
+  <span class="spacer"></span>
+  <span class="seg"><button class="on" data-view="time">시간</button><button data-view="fft">스펙트럼</button></span>
+</div>
+
+<div class="stats">
+  <div><b>주행 시간</b> <span id="dur">0.0 s</span></div>
+  <div><b>이동 거리</b> <span id="dist">0.00 m</span></div>
+  <div><b>드리프트 보정</b> <span id="bias">—</span></div>
+  <div><b>샘플 수</b> <span id="n">0</span></div>
+  <div id="horiz" style="grid-column:1/-1"></div>
+  <div id="isoBox" style="grid-column:1/-1"></div>
+  <div id="rbBox" style="grid-column:1/-1"></div>
+  <div id="qBox" style="grid-column:1/-1"></div>
+  <div id="nzBox" style="grid-column:1/-1"></div>
+  <div id="peaks"></div>
+</div>
+
+<div class="row">
+  <label for="fc">LPF</label>
+  <select id="fc"><option value="2">2 Hz</option><option value="3" selected>3 Hz</option><option value="5">5 Hz</option><option value="8">8 Hz</option></select>
+  <label for="jfc">저크</label>
+  <select id="jfc"><option value="1">1 Hz</option><option value="2" selected>2 Hz</option><option value="4">4 Hz</option></select>
+  <span class="spacer"></span>
+  <label for="rate">샘플링</label>
+  <select id="rate"><option value="0">자동(60)</option><option value="100">100 Hz</option><option value="200" selected>200 Hz</option><option value="400">400 Hz</option></select>
+  <label for="auto">자동정지</label>
+  <select id="auto"><option value="0">끔</option><option value="1" selected>1 s</option><option value="2">2 s</option><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option><option value="20">20 s</option><option value="30">30 s</option><option value="45">45 s</option><option value="60">60 s</option></select>
+  <label for="fax">FFT 축</label>
+  <select id="fax"><option value="ar" selected>수직</option><option value="xr">전후</option><option value="yr">좌우</option></select>
+  <label for="fseg">FFT 구간</label>
+  <select id="fseg"><option value="const" selected>등속</option><option value="acc">가속</option><option value="dec">감속</option><option value="all">전체</option></select>
+</div>
+
+<details><summary>시험 결과 요약 (전 회차)</summary><table id="sum"></table></details>
+<div style="font-size:11px;color:var(--dim);text-align:center">버전 <span id="ver">__VERSION__</span></div>
+<details><summary>설비 제원 (주파수 원인 추정용)</summary>
+  <div class="meta">
+    <input id="p-dia" type="number" step="1" placeholder="시브 직경 mm (예: 400)">
+    <select id="p-rope"><option value="1">로핑 1:1</option><option value="2" selected>로핑 2:1</option><option value="4">로핑 4:1</option></select>
+    <input id="p-gear" type="number" step="0.01" placeholder="감속비 (기어리스 = 1)">
+    <input id="p-pole" type="number" step="2" placeholder="모터 극수 (예: 20)">
+    <input id="p-rail" type="number" step="0.1" placeholder="레일 1본 길이 m (기본 5)">
+    <input id="p-brk" type="number" step="0.1" placeholder="브래킷 피치 m (기본 2.5)">
+  </div>
+</details>
+<details><summary>리포트 정보</summary>
+  <div class="meta">
+    <input id="m-site" placeholder="현장명"><input id="m-unit" placeholder="호기 / 기종">
+    <input id="m-spec" placeholder="정격 속도·적재 (예: 1.0 m/s, 1000 kg)"><input id="m-by" placeholder="측정자">
+    <input id="m-addr" placeholder="주소 (위치 확인 시 자동)" style="grid-column:1/-1">
+    <input id="m-mail" placeholder="메일 수신자 (쉼표로 여러 명)" style="grid-column:1/-1">
+  </div>
+  <div class="row" style="margin-top:6px">
+    <button class="sub" id="geo" style="padding:8px 12px;flex:0 0 auto">현재 위치로 현장 확인</button>
+    <span id="geotxt" style="font-size:11.5px;color:var(--dim)">좌표 없음</span>
+  </div>
+</details>
+
+<div class="btns">
+  <button class="sub" id="csv" disabled>CSV 저장</button>
+  <button class="sub" id="load">CSV 불러오기</button>
+  <button class="sub" id="reset" disabled>초기화</button>
+  <button class="sub" id="report">리포트</button>
+  <button class="sub" id="mail" disabled>메일 전송</button>
+  <input type="file" id="file" accept=".csv,text/csv" hidden>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const msg = (t, cls='') => { $('msg').textContent = t; $('msg').className = cls; };
+  const IDLE_MSG = '휴대폰을 카 바닥이나 손잡이에 고정하고, 정지 상태에서 시작을 누르세요.';
+  const DIR = { up:'상승', down:'하강' };
+  const label = k => DIR[k.dir] + ' ' + k.n + '회';
+  const kid = k => k.dir + k.n;
+
+  // ---- 데이터: runs['up1'..'down5'] ----
+  const newRun = () => ({ S:[], state:'idle', fsEst:0, bias:null, src:null });
+  let runs = {}, nTrials = 3;
+  let cur = { dir:'up', n:1 };   // 표시 중
+  let recKey = null;             // 기록 중인 run id
+  let prevRun = null;            // 기록 시작 전 상태 (취소 시 복원)
+  let view = 'time';
+  const show = { a:true, v:true, j:true, ar:false, x:false, y:false };
+  const R_ = k => runs[k] || (runs[k] = newRun());
+
+  // ---- 영속 저장 (기기 브라우저 로컬) ----
+  function save() {
+    try {
+      const o = { nTrials, runs:{} };
+      for (const k in runs) if (runs[k].S.length && runs[k].state === 'done')
+        o.runs[k] = { S:runs[k].S.map(p => [p.t,p.ar,p.a,p.v,p.j,p.s,p.xr||0,p.yr||0,p.x||0,p.y||0,p.jx||0,p.jy||0].map(x => +x.toFixed(4))), fsEst:runs[k].fsEst, bias:runs[k].bias, src:runs[k].src, nz:runs[k].nz ? runs[k].nz.map(p => [+p.t.toFixed(2), +p.a.toFixed(1), +p.z.toFixed(1)]) : null };
+      localStorage.setItem('erm2', JSON.stringify(o));
+    } catch(_) {}
+  }
+  function load() {
+    try {
+      const o = JSON.parse(localStorage.getItem('erm2') || 'null'); if (!o) return;
+      nTrials = o.nTrials || 3;
+      for (const k in o.runs) { const r = newRun(); r.S = o.runs[k].S.map(x => ({t:x[0],ar:x[1],a:x[2],v:x[3],j:x[4],s:x[5],xr:x[6]||0,yr:x[7]||0,x:x[8]||0,y:x[9]||0,jx:x[10]||0,jy:x[11]||0})); r.fsEst = o.runs[k].fsEst; r.bias = o.runs[k].bias; r.src = o.runs[k].src; r.state = 'done';
+      if (o.runs[k].nz) r.nz = o.runs[k].nz.map(x => ({t:x[0], a:x[1], z:x[2]}));
+      runs[k] = r; }
+    } catch(_) {}
+  }
+
+  // ---- 기록 ----
+  let ghat = null, h1 = null, h2 = null, gmag = 9.81, calibBuf = [];
+  let t0 = 0, lastT = 0, lastA = 0, lastX = 0, lastY = 0, v = 0, s = 0;
+  const aSt = [0,0], jSt = [0,0], xSt = [0,0], ySt = [0,0], jxSt = [0,0], jySt = [0,0];
+  let wake = null, raf = 0;
+  let phase = 'wait', phT = 0, sA = 0; // 자동정지 상태기계
+  let sensor = null, srcName = '';
+
+  // 고주파 경로: Generic Sensor API(Accelerometer) 우선, 실패 시 devicemotion(60 Hz 상한)
+  async function startSensor() {
+    const want = +$('rate').value;
+    if (want > 0 && 'Accelerometer' in window) {
+      try {
+        if (navigator.permissions) {
+          const st = await navigator.permissions.query({ name:'accelerometer' });
+          if (st.state === 'denied') throw new Error('denied');
+        }
+        const sn = new Accelerometer({ frequency: want, referenceFrame: 'device' });
+        await new Promise((res, rej) => {
+          let ok = false;
+          sn.onreading = () => { ok = true; res(); };
+          sn.onerror = ev => rej(ev.error || new Error('sensor error'));
+          sn.start();
+          setTimeout(() => ok || rej(new Error('no reading')), 1200);
+        });
+        sn.onreading = () => onSample(sn.x, sn.y, sn.z);
+        sensor = sn; srcName = 'Sensor API';
+        return true;
+      } catch (e) { try { sensor?.stop(); } catch(_) {} sensor = null; }
+    }
+    window.addEventListener('devicemotion', onMotion);
+    srcName = 'DeviceMotion'; return true;
+  }
+  function stopSensor() {
+    if (sensor) { try { sensor.onreading = null; sensor.stop(); } catch(_) {} sensor = null; }
+    window.removeEventListener('devicemotion', onMotion);
+  }
+
+  function lpf(x, dt, fc, st) {
+    const rc = 1 / (2 * Math.PI * fc), al = dt / (rc + dt);
+    st[0] += al * (x - st[0]); st[1] += al * (st[0] - st[1]); return st[1];
+  }
+
+  function onMotion(e) {
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x == null) return;
+    onSample(g.x, g.y, g.z);
+  }
+  function onSample(gx, gy, gz) {
+    if (!recKey) return;
+    const R = runs[recKey], now = performance.now() / 1000;
+    if (R.state === 'calib') {
+      calibBuf.push([gx, gy, gz, now]);
+      if (now - calibBuf[0][3] >= 2.0) {
+        const n = calibBuf.length;
+        const m = calibBuf.reduce((p,c)=>[p[0]+c[0],p[1]+c[1],p[2]+c[2]],[0,0,0]).map(x=>x/n);
+        gmag = Math.hypot(...m); ghat = m.map(x => x / gmag);
+        // 수평면 직교 기저: 기기 Y축(세로)을 수평면에 투영 → h1(전후 가정), h2 = ghat × h1(좌우)
+        let ref = [0,1,0];
+        if (Math.abs(ghat[1]) > 0.9) ref = [0,0,1];
+        const d = ref[0]*ghat[0] + ref[1]*ghat[1] + ref[2]*ghat[2];
+        let h = [ref[0]-d*ghat[0], ref[1]-d*ghat[1], ref[2]-d*ghat[2]];
+        const hn = Math.hypot(...h); h1 = h.map(x => x/hn);
+        h2 = [ghat[1]*h1[2]-ghat[2]*h1[1], ghat[2]*h1[0]-ghat[0]*h1[2], ghat[0]*h1[1]-ghat[1]*h1[0]];
+        xSt[0]=xSt[1]=0; ySt[0]=ySt[1]=0; jxSt[0]=jxSt[1]=0; jySt[0]=jySt[1]=0; lastX = 0; lastY = 0;
+        R.fsEst = n / (now - calibBuf[0][3]);
+        aSt[0]=aSt[1]=0; jSt[0]=jSt[1]=0;
+        t0 = now; lastT = now; lastA = 0; v = 0; s = 0; R.S = [];
+        phase = 'wait'; phT = 0; sA = 0;
+        R.state = 'rec'; refreshUI(); setPhase();
+        msg(`[${label(cur)}] 영점 완료 · ${srcName} ${R.fsEst.toFixed(0)} Hz (|g| = ${gmag.toFixed(3)}). 기록 중 — 주행 후 정지.`, 'ok');
+        raf = requestAnimationFrame(draw);
+        if (R.nz) { const tz = performance.now()/1000; nzTimer = setInterval(() => nzSample(R, performance.now()/1000 - tz), 50); }
+      }
+      return;
+    }
+    if (R.state !== 'rec') return;
+    const dt = now - lastT; if (dt <= 0 || dt > 0.5) { lastT = now; return; }
+    lastT = now;
+    const t = now - t0;
+    const fc = +$('fc').value;
+    const ar = gx*ghat[0] + gy*ghat[1] + gz*ghat[2] - gmag;
+    const xr = gx*h1[0] + gy*h1[1] + gz*h1[2];
+    const yr = gx*h2[0] + gy*h2[1] + gz*h2[2];
+    const a = lpf(ar, dt, fc, aSt);
+    const j = lpf((a - lastA) / dt, dt, +$('jfc').value, jSt);
+    const x = lpf(xr, dt, fc, xSt), y = lpf(yr, dt, fc, ySt);
+    const jfc = +$('jfc').value;
+    const jx = lpf((x - lastX) / dt, dt, jfc, jxSt), jy = lpf((y - lastY) / dt, dt, jfc, jySt);
+    lastX = x; lastY = y;
+    v += (a + lastA) / 2 * dt; s += v * dt; lastA = a;
+    R.S.push({t, ar, a, v, j, s, xr, yr, x, y, jx, jy});
+
+    // 자동 정지: 속도 패턴 인식. 가속(부호 sA) → [등속] → 감속(부호 -sA) → 정지(|a|<0.05 가 hold 초 지속)
+    const hold = +$('auto').value;
+    if (hold > 0) {
+      const HI = 0.15, LO = 0.05;
+      if (phase === 'wait') {
+        if (Math.abs(a) > HI) { phT += dt; if (phT >= 0.3) { phase = 'acc'; sA = Math.sign(a); phT = 0; setPhase(); } } else phT = 0;
+      } else if (phase === 'acc' || phase === 'cruise') {
+        if (a * sA < -HI) { phT += dt; if (phT >= 0.3) { phase = 'dec'; phT = 0; setPhase(); } }
+        else { phT = 0; if (phase === 'acc' && Math.abs(a) < LO) { phase = 'cruise'; setPhase(); } }
+      } else if (phase === 'dec') {
+        if (Math.abs(a) < LO) { phT += dt; if (phT >= hold) { finish(true); return; } }
+        else if (a * sA < -HI) phT = 0;   // 아직 감속 중
+        else phT = 0;
+      }
+    }
+  }
+  const PH = { wait:'대기', acc:'가속', cruise:'등속', dec:'감속' };
+  function setPhase() { if (recKey) $('fs').textContent = runs[recKey].fsEst.toFixed(0) + ' Hz · ' + PH[phase]; }
+
+  function finish(auto) {
+    const key = recKey, R = runs[key];
+    stopSensor();
+    try { screen.orientation.unlock(); } catch(_) {}
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch(_) {} }
+    cancelAnimationFrame(raf);
+    if (wake) { wake.release(); wake = null; }
+    recKey = null;
+    if (R.S.length < 10) {
+      if (prevRun) runs[key] = prevRun; else runs[key] = newRun();
+      prevRun = null; refreshUI();
+      msg('데이터가 부족합니다. 다시 시도하세요.' + (runs[key].S.length ? ' 직전 측정값은 유지됩니다.' : ''), 'err');
+      return;
+    }
+    const S = R.S, T = S[S.length-1].t, bias = S[S.length-1].v / T;
+    let vv = 0, ss = 0;
+    for (let i = 0; i < S.length; i++) {
+      const p = S[i]; p.a -= bias;
+      if (i > 0) { const q = S[i-1], dt = p.t - q.t; vv += (p.a + q.a)/2*dt; ss += vv*dt; }
+      p.v = vv; p.s = ss;
+    }
+    R.bias = bias; R.state = 'done'; R.src = null; prevRun = null;
+
+    // 방향 자동 판정: 순 변위 부호(+ = 상승). 드리프트 보정 후 값이라 m 단위에서 부호는 안정적.
+    let moved = '';
+    const net = S[S.length-1].s;
+    if ($('autodir').checked && Math.abs(net) > 0.1) {
+      const det = net > 0 ? 'up' : 'down';
+      if (det !== key.replace(/\d+$/, '')) {
+        const n0 = +key.match(/\d+$/)[0];
+        let slot = 0;
+        if (!runs[det+n0] || !runs[det+n0].S.length) slot = n0;
+        else for (let n = 1; n <= nTrials; n++) if (!runs[det+n] || !runs[det+n].S.length) { slot = n; break; }
+        if (slot) {
+          runs[det+slot] = R; delete runs[key];
+          cur = { dir:det, n:slot };
+          moved = ` — 순 변위 ${net.toFixed(2)} m로 ${DIR[det]} 판정, ${DIR[det]} ${slot}회로 이동`;
+        } else {
+          moved = ` — ${DIR[det]}으로 판정되나 빈 회차가 없어 그대로 둡니다`;
+        }
+      }
+    }
+    save(); refreshUI();
+    msg(`[${label(cur)}] ${auto ? '정지 감지 → 자동 종료' : '기록 종료'}. 종료 시 정지 조건으로 드리프트 보정했습니다.${moved}`, 'ok');
+    if (auto && navigator.vibrate) navigator.vibrate([80,60,80]);
+  }
+
+  // ---- 통계 ----
+  function stats(S) {
+    let o = {aMx:-1e9,aMn:1e9,vMx:-1e9,vMn:1e9,jMx:-1e9,jMn:1e9};
+    for (const q of S) { o.aMx=Math.max(o.aMx,q.a); o.aMn=Math.min(o.aMn,q.a); o.vMx=Math.max(o.vMx,q.v); o.vMn=Math.min(o.vMn,q.v); o.jMx=Math.max(o.jMx,q.j); o.jMn=Math.min(o.jMn,q.j); }
+    return o;
+  }
+  function axStats(S, k) {
+    let mx=-1e9, mn=1e9, m=0;
+    for (const q of S) { const u = q[k]||0; mx = Math.max(mx,u); mn = Math.min(mn,u); m += u; }
+    m /= S.length;
+    let sq = 0; for (const q of S) { const u = (q[k]||0) - m; sq += u*u; }
+    return { mx, mn, pp: mx-mn, rms: Math.sqrt(sq/S.length), mean: m };
+  }
+  function horizStats(S) {
+    if (!S.length || S[0].x === undefined) return null;
+    let xMx=-1e9,xMn=1e9,yMx=-1e9,yMn=1e9,sx=0,sy=0,mx=0,my=0;
+    for (const q of S) { mx += q.x; my += q.y; }
+    mx /= S.length; my /= S.length;
+    for (const q of S) { xMx=Math.max(xMx,q.x); xMn=Math.min(xMn,q.x); yMx=Math.max(yMx,q.y); yMn=Math.min(yMn,q.y);
+      sx += (q.x-mx)*(q.x-mx); sy += (q.y-my)*(q.y-my); }
+    return { xpp:xMx-xMn, ypp:yMx-yMn, xrms:Math.sqrt(sx/S.length), yrms:Math.sqrt(sy/S.length), xMx, xMn, yMx, yMn };
+  }
+  function updateStats() {
+    const R = R_(kid(cur)), S = R.S;
+    if (!S.length) {
+      for (const id of ['a','v','j','amax','vmax','jmax','amin','vmin','jmin']) $(id).textContent = '0.00';
+      $('dur').textContent='0.0 s'; $('dist').textContent='0.00 m'; $('n').textContent='0'; $('bias').textContent='—'; return;
+    }
+    const p = S[S.length-1], o = stats(S), ax = $('axis').value;
+    if (ax === 'v') {
+      $('k1').textContent = '가속도'; $('u1').textContent = 'm/s²';
+      $('k2').textContent = '속도';   $('u2').textContent = 'm/s';
+      $('k3').textContent = '저크';   $('u3').textContent = 'm/s³';
+      $('a').textContent = p.a.toFixed(2); $('v').textContent = p.v.toFixed(2); $('j').textContent = p.j.toFixed(2);
+      $('amax').textContent = o.aMx.toFixed(2); $('amin').textContent = o.aMn.toFixed(2);
+      $('vmax').textContent = o.vMx.toFixed(2); $('vmin').textContent = o.vMn.toFixed(2);
+      $('jmax').textContent = o.jMx.toFixed(2); $('jmin').textContent = o.jMn.toFixed(2);
+    } else {
+      const k = ax, jk = ax === 'x' ? 'jx' : 'jy', nm = ax === 'x' ? '전후' : '좌우';
+      const ac = axStats(S, k), jc = axStats(S, jk);
+      $('k1').textContent = '가속도 ' + nm; $('u1').textContent = 'm/s²';
+      $('k2').textContent = 'RMS ' + nm;    $('u2').textContent = 'm/s²';
+      $('k3').textContent = '저크 ' + nm;   $('u3').textContent = 'm/s³';
+      $('a').textContent = (p[k]||0).toFixed(3); $('v').textContent = ac.rms.toFixed(3); $('j').textContent = (p[jk]||0).toFixed(2);
+      $('amax').textContent = ac.mx.toFixed(3); $('amin').textContent = ac.mn.toFixed(3);
+      $('vmax').textContent = ac.pp.toFixed(3); $('vmin').textContent = '(p-p)';
+      $('jmax').textContent = jc.mx.toFixed(2); $('jmin').textContent = jc.mn.toFixed(2);
+    }
+    $('dur').textContent = p.t.toFixed(1) + ' s'; $('dist').textContent = p.s.toFixed(2) + ' m'; $('n').textContent = S.length;
+    $('bias').textContent = R.src ? '(파일)' : R.bias == null ? '—' : (R.bias*1000).toFixed(1) + ' mm/s²';
+    const hz = horizStats(S);
+    const iso = R.done ? isoCalc(R) : null;
+    $('isoBox').innerHTML = iso ? `<b>ISO 18738 (참고)</b> 등속 ${iso.cvDur.toFixed(1)}s${iso.full?'(전체 대체)':''} · VPPV 수직 max ${iso.z.max.toFixed(3)} / A95 ${iso.z.a95.toFixed(3)} · 전후 ${iso.x.max.toFixed(3)}/${iso.x.a95.toFixed(3)} · 좌우 ${iso.y.max.toFixed(3)}/${iso.y.a95.toFixed(3)} m/s²<br>최대 가속 ${iso.aMax.toFixed(2)} · 감속 ${iso.dMax.toFixed(2)} m/s² · 최대 저크 ${iso.jMax.toFixed(2)} m/s³ · 최대 속도 ${iso.vMax.toFixed(2)} m/s` : '';
+    const nq = R.done ? noiseCv(R) : null;
+    $('nzBox').innerHTML = (!nq || !nq.cv) ? (R.nz ? '<b>소음</b> 데이터 부족' : '')
+      : `<b>소음</b> 등속${nq.cvSeg?'':'(전체 대체)'} Leq ${nq.cv.leq.toFixed(1)} · Lmax ${nq.cv.lmax.toFixed(1)} · L95 ${nq.cv.l95.toFixed(1)} ${nq.cv.unit}`;
+    const qa = R.done ? quality(R) : null;
+    $('qBox').innerHTML = !qa ? '' : qa.verdict === 'ok'
+      ? '<b>유효성</b> 정상'
+      : `<b>유효성</b> <span style="color:${qa.verdict==='reject'?'var(--jrk)':'var(--acc)'}">${VJ[qa.verdict]}</span> — ${qa.issues.map(i => i.msg).join(' · ')}`;
+    const rb = R.done ? rollback(R) : null;
+    $('rbBox').innerHTML = !rb ? '' : rb.short ? '<b>안티롤백</b> 출발 전 정지 구간이 짧아 분석 불가 (주행 전 0.5 s 이상 기록 필요)'
+      : rb.none ? `<b>안티롤백</b> 가속 개시 전 유의 거동 없음 (잡음 ${(rb.sd*1000).toFixed(1)} mm/s²)`
+      : `<b>안티롤백</b> 개방 ${rb.tBr.toFixed(2)}s → 가속 ${rb.tOn.toFixed(2)}s (${(rb.T*1000).toFixed(0)} ms) · 변위 ${(rb.xPk*1000).toFixed(1)} mm · 속도 ${(rb.vPk*1000).toFixed(1)} mm/s · ${rbDir(rb)}${rb.valid ? '' : ` · 잡음 한계 ±${(rb.xNoise*1000).toFixed(1)} mm 이내로 유의성 낮음`}`;
+    $('horiz').innerHTML = hz ? `<b>수평 진동</b> 전후 p-p ${hz.xpp.toFixed(3)} · rms ${hz.xrms.toFixed(3)} / 좌우 p-p ${hz.ypp.toFixed(3)} · rms ${hz.yrms.toFixed(3)} m/s²` : '';
+  }
+  function updateSummary() {
+    let h = '<tr><th>회차</th><th>a max/min</th><th>v max/min</th><th>j max/min</th><th>거리</th></tr>';
+    for (const dir of ['up','down']) for (let n = 1; n <= nTrials; n++) {
+      const R = runs[dir+n];
+      if (!R || !R.S.length) { h += `<tr><td>${DIR[dir]} ${n}</td><td colspan="4" style="color:var(--dim)">—</td></tr>`; continue; }
+      const o = stats(R.S), f = x => x.toFixed(2);
+      h += `<tr><td>${DIR[dir]} ${n}</td><td>${f(o.aMx)} / ${f(o.aMn)}</td><td>${f(o.vMx)} / ${f(o.vMn)}</td><td>${f(o.jMx)} / ${f(o.jMn)}</td><td>${f(R.S[R.S.length-1].s)}</td></tr>`;
+    }
+    $('sum').innerHTML = h;
+  }
+
+  // ---- FFT ----
+  function fft(re, im) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+      if (i < j) { [re[i],re[j]] = [re[j],re[i]]; [im[i],im[j]] = [im[j],im[i]]; } }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < len/2; k++) {
+          const ur = re[i+k], ui = im[i+k], xr = re[i+k+len/2], xi = im[i+k+len/2];
+          const vr = xr*cr - xi*ci, vi = xr*ci + xi*cr;
+          re[i+k] = ur+vr; im[i+k] = ui+vi; re[i+k+len/2] = ur-vr; im[i+k+len/2] = ui-vi;
+          const t = cr*wr - ci*wi; ci = cr*wi + ci*wr; cr = t;
+        }
+      }
+    }
+  }
+  // 구간 분할: 최초 |a|>0.1 m/s² 이후 ~ |v|가 최대의 90%에 처음 도달 = 가속,
+  // 마지막으로 90% 이상인 지점 ~ 마지막 |a|>0.1 = 감속, 그 사이 = 등속
+  function segments(S) {
+    const n = S.length; if (n < 10) return null;
+    let vm = 0; for (const p of S) vm = Math.max(vm, Math.abs(p.v));
+    if (vm < 0.05) return null;
+    let i0 = 0; while (i0 < n && Math.abs(S[i0].a) < 0.1) i0++;
+    let i3 = n-1; while (i3 > 0 && Math.abs(S[i3].a) < 0.1) i3--;
+    let i1 = i0; while (i1 < n && Math.abs(S[i1].v) < 0.9*vm) i1++;
+    let i2 = i3; while (i2 > 0 && Math.abs(S[i2].v) < 0.9*vm) i2--;
+    if (!(i0 < i1 && i1 <= i2 && i2 < i3)) return null;
+    return { acc:[i0,i1], const:[i1,i2], dec:[i2,i3], all:[0,n-1] };
+  }
+  const SEGNAME = { acc:'가속', const:'등속', dec:'감속', all:'전체' };
+  function spectrum(R, wantArg, axArg) {
+    const full = R.S; if (full.length < 32) return null;
+    const want = wantArg || $('fseg').value, seg = segments(full);
+    let S = full, used = 'all';
+    if (want !== 'all' && seg) { const [a,b] = seg[want]; if (b-a+1 >= 32) { S = full.slice(a, b+1); used = want; } }
+    const fs = (S.length-1) / (S[S.length-1].t - S[0].t);
+    const ax = axArg || $('fax').value;
+    const mean = S.reduce((a,p)=>a+(p[ax]||0),0)/S.length;
+    let n = 1; while (n < S.length) n <<= 1;
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < S.length; i++) { const w = 0.5 - 0.5*Math.cos(2*Math.PI*i/(S.length-1)); re[i] = ((S[i][ax]||0) - mean) * w; }
+    fft(re, im);
+    const half = n/2, amp = new Float64Array(half), df = fs/n;
+    for (let k = 0; k < half; k++) amp[k] = 2 * Math.hypot(re[k], im[k]) / (S.length * 0.5); // Hann 코히런트 게인 0.5 보정
+    const peaks = [];
+    for (let k = 2; k < half-1; k++) if (k*df >= 0.3 && amp[k] > amp[k-1] && amp[k] >= amp[k+1]) peaks.push({f:k*df, a:amp[k]});
+    peaks.sort((x,y) => y.a - x.a);
+    const dur = S[S.length-1].t - S[0].t;
+    const AXN = { ar:'수직', xr:'전후', yr:'좌우' };
+    return { amp, df, fs, peaks: peaks.slice(0,5), nSeg:S.length, dur, seg: SEGNAME[used], fallback: used !== want, axis: AXN[ax] };
+  }
+
+  // ---- 그리기 ----
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  function draw() {
+    const R = R_(kid(cur)), S = R.S;
+    const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== W*dpr) { cv.width = W*dpr; cv.height = H*dpr; }
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+    const padL=8, padR=8, padT=10, padB=18, w = W-padL-padR, h = H-padT-padB;
+    ctx.font = '11px system-ui'; ctx.fillStyle = '#8d9ab0';
+    const empty = t => { ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.fillText(t, W/2, H/2 - 6); };
+
+    if (view === 'fft') {
+      $('peaks').style.display = 'block';
+      const sp = R.state === 'done' ? spectrum(R) : null;
+      if (!sp) { empty(`${label(cur)} 스펙트럼 없음 (기록 완료 후 표시)`); $('peaks').innerHTML = ''; return; }
+      const fmax = sp.fs/2, base = padT + h;
+      let am = 0; for (let k = 1; k < sp.amp.length; k++) am = Math.max(am, sp.amp[k]); am = am || 1;
+      ctx.strokeStyle = '#2b3648'; ctx.lineWidth = 1;
+      const step = fmax > 120 ? 50 : fmax > 60 ? 25 : fmax > 35 ? 10 : 5;
+      for (let f = step; f < fmax; f += step) { const x = padL + f/fmax*w; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,base); ctx.stroke(); ctx.textAlign='center'; ctx.fillText(f+'', x, H-4); }
+      ctx.strokeStyle = '#f2b33d'; ctx.lineWidth = 1.6; ctx.beginPath();
+      for (let k = 1; k < sp.amp.length; k++) { const x = padL + k*sp.df/fmax*w, y = base - sp.amp[k]/am*h; k===1 ? ctx.moveTo(x,y) : ctx.lineTo(x,y); }
+      ctx.stroke();
+      ctx.fillStyle = '#ff7d6e';
+      for (const p of sp.peaks.slice(0,3)) { const x = padL + p.f/fmax*w, y = base - p.a/am*h; ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fill(); }
+      ctx.fillStyle = '#8d9ab0'; ctx.textAlign = 'right'; ctx.fillText(`${sp.axis} · ${sp.seg}${sp.fallback?'(구간 부족→전체)':''} ${sp.dur.toFixed(1)}s ${sp.nSeg}샘플 @${sp.fs.toFixed(0)}Hz  Δf ${sp.df.toFixed(2)}Hz  peak ${am.toFixed(3)} m/s²`, W-padR, padT+10);
+      ctx.textAlign = 'left'; ctx.fillText('Hz', padL, H-4);
+      $('peaks').innerHTML = '<b>피크</b> ' + sp.peaks.map(p => `<span>${p.f.toFixed(2)} Hz · ${p.a.toFixed(3)}</span>`).join('');
+      return;
+    }
+
+    $('peaks').style.display = 'none';
+    const mid = padT + h/2;
+    ctx.strokeStyle = '#2b3648'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, mid); ctx.lineTo(padL+w, mid); ctx.stroke();
+    if (S.length > 1) {
+      const T = Math.max(S[S.length-1].t, 5);
+      const trace = (key, color, scale) => {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath();
+        for (let i = 0; i < S.length; i++) { const x = padL + S[i].t / T * w, y = mid - S[i][key] / scale * (h/2); i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }
+        ctx.stroke();
+      };
+      let am=0.5, vm=0.5, jm=0.5, hm=0.2;
+      for (const q of S) { am = Math.max(am, Math.abs(q.a)); vm = Math.max(vm, Math.abs(q.v)); jm = Math.max(jm, Math.abs(q.j));
+        hm = Math.max(hm, Math.abs(q.x||0), Math.abs(q.y||0)); }
+      const seg = R.state === 'done' ? segments(S) : null;
+      if (seg) {
+        ctx.strokeStyle = '#3f4d63'; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
+        for (const i of [seg.acc[0], seg.acc[1], seg.dec[0], seg.dec[1]]) { const x = padL + S[i].t/T*w; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,padT+h); ctx.stroke(); }
+        ctx.setLineDash([]); ctx.fillStyle = '#5d6b82'; ctx.textAlign = 'center';
+        const lab = (a,b,t) => ctx.fillText(t, padL + (S[a].t+S[b].t)/2/T*w, padT+10);
+        lab(seg.acc[0], seg.acc[1], '가속'); lab(seg.const[0], seg.const[1], '등속'); lab(seg.dec[0], seg.dec[1], '감속');
+      }
+      if (show.ar) trace('ar', '#5d6b82', am*1.1);
+      if (show.x) trace('x', '#9b8cff', hm*1.1);
+      if (show.y) trace('y', '#63d39a', hm*1.1);
+      if (show.j) trace('j', '#ff7d6e', jm*1.1); if (show.v) trace('v', '#5cc8ff', vm*1.1); if (show.a) trace('a', '#f2b33d', am*1.1);
+      ctx.fillStyle = '#8d9ab0'; ctx.textAlign = 'right';
+      ctx.fillText([show.a||show.ar ? `±${am.toFixed(1)} m/s²` : '', show.v ? `±${vm.toFixed(2)} m/s` : '', show.j ? `±${jm.toFixed(1)} m/s³` : '', (show.x||show.y) ? `수평 ±${hm.toFixed(2)}` : ''].filter(Boolean).join('  '), W-padR, H-4);
+      ctx.textAlign = 'left'; ctx.fillText(`${label(cur)}  0 – ${T.toFixed(0)} s`, padL, H-4);
+    } else empty(`${label(cur)} 데이터 없음`);
+    if (R.state === 'rec' && recKey === kid(cur)) { updateStats(); raf = requestAnimationFrame(draw); }
+  }
+
+  // ---- UI ----
+  function buildTrials() {
+    const box = $('trials'); box.innerHTML = '';
+    for (let n = 1; n <= nTrials; n++) {
+      const b = document.createElement('button'); b.className = 'chip'; b.dataset.n = n;
+      b.innerHTML = `<span class="dot"></span>${n}회`;
+      b.onclick = () => { cur = {dir:cur.dir, n}; refreshUI(); };
+      box.appendChild(b);
+    }
+    const sel = document.createElement('select'); sel.title = '회차 수';
+    for (let n = 1; n <= 5; n++) { const o = document.createElement('option'); o.value = n; o.textContent = n+'회'; if (n === nTrials) o.selected = true; sel.appendChild(o); }
+    sel.onchange = () => { nTrials = +sel.value; if (cur.n > nTrials) cur.n = nTrials; save(); buildTrials(); refreshUI(); };
+    box.appendChild(sel);
+  }
+  function refreshUI() {
+    const key = kid(cur), R = R_(key);
+    document.body.classList.toggle('rec', !!recKey);
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.dir === cur.dir));
+    document.querySelectorAll('.chip').forEach(b => {
+      const k = cur.dir + b.dataset.n, r = runs[k];
+      b.classList.toggle('on', +b.dataset.n === cur.n);
+      b.querySelector('.dot').className = 'dot' + (recKey === k ? ' rec' : r && r.S.length ? ' has' : '');
+    });
+    $('fs').textContent = R.fsEst ? R.fsEst.toFixed(0) + ' Hz' : '— Hz';
+    const go = $('go'); go.classList.remove('stop');
+    if (recKey) {
+      go.disabled = recKey !== key;
+      go.textContent = recKey === key ? '정지' : `${label({dir:recKey.replace(/\d+$/,''), n:+recKey.match(/\d+$/)[0]})} 기록 중`;
+      if (recKey === key) go.classList.add('stop');
+    } else { go.disabled = false; go.textContent = R.S.length ? `${label(cur)} 다시 측정` : `${label(cur)} 시작`; }
+    $('csv').disabled = !R.S.length || recKey === key;
+    $('reset').disabled = !R.S.length || !!recKey;
+    $('load').disabled = !!recKey;
+    updateStats(); updateSummary(); draw();
+  }
+  function setView(v) {
+    view = v;
+    document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+    $('lg-time').style.display = v === 'time' ? '' : 'none';
+    $('lg-fft').style.display = v === 'fft' ? '' : 'none';
+    draw();
+  }
+
+  async function start() {
+    const key = kid(cur);
+    if (recKey === key) return finish();
+    if (recKey) return;
+    try {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const r = await DeviceMotionEvent.requestPermission();
+        if (r !== 'granted') { msg('모션 센서 권한이 거부되었습니다.', 'err'); return; }
+      }
+      if (!('DeviceMotionEvent' in window)) { msg('이 브라우저는 모션 센서를 지원하지 않습니다.', 'err'); return; }
+      if (!isSecureContext) { msg('HTTPS에서만 센서를 사용할 수 있습니다.', 'err'); return; }
+      try { wake = await navigator.wakeLock?.request('screen'); } catch(_) {}
+      runs[key] = newRun(); runs[key].state = 'calib';
+      recKey = key; calibBuf = []; setView('time');
+      await startSensor();
+      if ($('landscape').checked) {
+        try { await document.documentElement.requestFullscreen(); } catch(_) {}
+        try { await screen.orientation.lock('landscape'); } catch(_) {}
+      }
+      refreshUI(); msg(`[${label(cur)}] 영점 잡는 중… 2초간 움직이지 마세요.`);
+      msg(`[${label(cur)}] 영점 잡는 중… (${srcName}) 2초간 움직이지 마세요.`);
+      setTimeout(() => { if (runs[recKey]?.state === 'calib' && calibBuf.length === 0) msg('센서 데이터가 들어오지 않습니다. Chrome에서 열었는지 확인하세요.', 'err'); }, 1500);
+    } catch (e) { msg('시작 실패: ' + e.message, 'err'); }
+  }
+
+  // 측정 강제 취소: 센서를 즉시 끊고 이번 회차 데이터를 폐기, 직전 상태로 되돌린다
+  function abortRec() {
+    if (!recKey) return;
+    const key = recKey;
+    stopSensor();
+    if (nzTimer) { clearInterval(nzTimer); nzTimer = 0; }
+    nzStop();
+    cancelAnimationFrame(raf);
+    if (wake) { try { wake.release(); } catch(_) {} wake = null; }
+    try { screen.orientation.unlock(); } catch(_) {}
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch(_) {} }
+    recKey = null;
+    const restored = !!prevRun;
+    if (prevRun) runs[key] = prevRun; else delete runs[key];
+    prevRun = null;
+    refreshUI();
+    msg(`[${label(cur)}] 측정을 취소했습니다. 이번 데이터는 저장하지 않았습니다.` + (restored ? ' 직전 측정값은 그대로 유지됩니다.' : ''));
+    if (navigator.vibrate) navigator.vibrate(30);
+  }
+  $('abort').onclick = () => {
+    if (!recKey) return;
+    const R = runs[recKey];
+    const n = R && R.S ? R.S.length : 0;
+    if (n > 200 && !confirm(`${n}개 샘플이 기록됐습니다. 정말 폐기할까요?`)) return;
+    abortRec();
+  };
+
+  function reset() { if (recKey) return; runs[kid(cur)] = newRun(); save(); refreshUI(); msg(`[${label(cur)}] 초기화됨.`); }
+
+  function exportCsv() {
+    const S = R_(kid(cur)).S; if (!S.length) return;
+    const rows = ['t_s,a_raw_mps2,a_filt_mps2,v_mps,jerk_mps3,s_m,ax_raw_mps2,ay_raw_mps2,ax_filt_mps2,ay_filt_mps2,jx_mps3,jy_mps3'];
+    for (const p of S) rows.push([p.t, p.ar, p.a, p.v, p.j, p.s, p.xr||0, p.yr||0, p.x||0, p.y||0, p.jx||0, p.jy||0].map(n => n.toFixed(4)).join(','));
+    const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `elevator_${kid(cur)}_` + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19) + '.csv';
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function importCsv(file) {
+    const rd = new FileReader();
+    rd.onload = () => {
+      const lines = rd.result.split(/\r?\n/).filter(l => l.trim());
+      const head = lines[0].split(',').map(h => h.trim()), col = n => head.indexOf(n);
+      const iT=col('t_s'), iAr=col('a_raw_mps2'), iA=col('a_filt_mps2'), iV=col('v_mps'), iJ=col('jerk_mps3'), iS=col('s_m');
+      const iXr=col('ax_raw_mps2'), iYr=col('ay_raw_mps2'), iX=col('ax_filt_mps2'), iY=col('ay_filt_mps2'), iJx=col('jx_mps3'), iJy=col('jy_mps3');
+      if (iT<0 || iA<0) { msg('이 앱에서 저장한 CSV 형식이 아닙니다.', 'err'); return; }
+      const out = [];
+      for (let i = 1; i < lines.length; i++) { const c = lines[i].split(',').map(Number); if (!isFinite(c[iT])) continue;
+        out.push({t:c[iT], ar:iAr>=0?c[iAr]:c[iA], a:c[iA], v:iV>=0?c[iV]:0, j:iJ>=0?c[iJ]:0, s:iS>=0?c[iS]:0,
+          xr:iXr>=0?c[iXr]:0, yr:iYr>=0?c[iYr]:0, x:iX>=0?c[iX]:0, y:iY>=0?c[iY]:0, jx:iJx>=0?c[iJx]:0, jy:iJy>=0?c[iJy]:0}); }
+      if (out.length < 2) { msg('데이터 행이 없습니다.', 'err'); return; }
+      const m = file.name.toLowerCase().match(/_(up|down)(\d)?[_.]/);
+      if (m) { cur = { dir:m[1], n: m[2] ? Math.min(+m[2], nTrials) || 1 : cur.n }; }
+      const R = newRun(); R.S = out; R.state = 'done'; R.src = file.name; R.fsEst = (out.length-1)/out[out.length-1].t;
+      runs[kid(cur)] = R; save(); refreshUI(); msg(`[${label(cur)}] 불러옴: ${file.name}`, 'ok');
+    };
+    rd.readAsText(file);
+  }
+
+  // ---- 위치 ----
+  let geo = null;  // {lat, lon, acc, ts, addr}
+  const MKEYS = ['m-site','m-unit','m-spec','m-by','m-addr','m-mail','p-dia','p-rope','p-gear','p-pole','p-rail','p-brk'];
+  function saveMeta() {
+    try { localStorage.setItem('erm2meta', JSON.stringify({ v:MKEYS.map(k => $(k).value), geo })); } catch(_) {}
+  }
+  function loadMeta() {
+    try { const o = JSON.parse(localStorage.getItem('erm2meta') || 'null'); if (!o) return;
+      MKEYS.forEach((k,i) => $(k).value = o.v[i] || ''); geo = o.geo || null; showGeo(); } catch(_) {}
+  }
+  function showGeo() {
+    $('geotxt').textContent = geo
+      ? `${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)} (±${geo.acc.toFixed(0)} m)`
+      : '좌표 없음';
+  }
+  function getGeo() {
+    if (!navigator.geolocation) { msg('이 브라우저는 위치를 지원하지 않습니다.', 'err'); return; }
+    $('geo').disabled = true; $('geotxt').textContent = '위치 확인 중…';
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const c = pos.coords;
+      geo = { lat:c.latitude, lon:c.longitude, acc:c.accuracy, ts:pos.timestamp, addr:null };
+      showGeo(); $('geo').disabled = false;
+      if (c.accuracy > 100) msg(`위치 정확도 ±${c.accuracy.toFixed(0)} m — 실내라 오차가 큽니다. 건물 밖이나 창가에서 다시 시도하면 정확해집니다.`, 'err');
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${c.latitude}&lon=${c.longitude}&zoom=18&accept-language=ko`);
+        const d = await r.json();
+        const a = d.address || {};
+        const name = d.name || a.building || a.amenity || a.shop || a.office || '';
+        geo.addr = d.display_name || '';
+        if (name && !$('m-site').value) $('m-site').value = name;
+        if (geo.addr && !$('m-addr').value) $('m-addr').value = geo.addr;
+        saveMeta();
+        msg(name ? `위치 확인: ${name}` : '좌표만 확보했습니다. 건물명은 직접 입력하세요.', 'ok');
+      } catch (e) { saveMeta(); msg('좌표는 확보했으나 건물 조회에 실패했습니다. 현장명을 직접 입력하세요.', 'err'); }
+    }, err => {
+      $('geo').disabled = false; showGeo();
+      msg(err.code === 1 ? '위치 권한이 거부되었습니다.' : '위치를 가져오지 못했습니다.', 'err');
+    }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+  }
+  $('geo').onclick = getGeo;
+  MKEYS.forEach(k => $(k).oninput = saveMeta);
+
+
+  // ================= ISO 18738 산출 (참고용) =================
+  // 2극 버터워스 저역통과 (쌍선형 변환), 위상 보정을 위해 순·역방향 2회 적용
+  function butter2(fc, fs) {
+    const w = Math.tan(Math.PI * fc / fs), k = Math.SQRT2 * w, n = w * w, d = 1 + k + n;
+    return { b0:n/d, b1:2*n/d, b2:n/d, a1:2*(n-1)/d, a2:(1-k+n)/d };
+  }
+  function biquad(arr, c) {
+    let x1=0, x2=0, y1=0, y2=0; const out = new Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      const y = c.b0*v + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2;
+      x2 = x1; x1 = v; y2 = y1; y1 = y; out[i] = y;
+    }
+    return out;
+  }
+  function filtfilt(arr, c) { return biquad(biquad(arr, c).reverse(), c).reverse(); }
+
+  // 영교차점 기준 peak-to-peak 진동값(VPPV) 목록 → Max, A95
+  function vppv(sig) {
+    const zc = [];
+    for (let i = 1; i < sig.length; i++)
+      if ((sig[i-1] < 0 && sig[i] >= 0) || (sig[i-1] >= 0 && sig[i] < 0)) zc.push(i);
+    const P = [];
+    for (let k = 0; k + 2 < zc.length; k++) {
+      let mx = -1e9, mn = 1e9;
+      for (let i = zc[k]; i < zc[k+2]; i++) { mx = Math.max(mx, sig[i]); mn = Math.min(mn, sig[i]); }
+      if (mx > mn) P.push(mx - mn);
+    }
+    if (!P.length) return { max:0, a95:0, n:0 };
+    const srt = P.slice().sort((a,b) => a-b);
+    return { max: srt[srt.length-1], a95: srt[Math.floor(0.95 * (srt.length - 1))], n: P.length };
+  }
+
+  // 1 Hz 필터로 가·감속(비등속) 구간 판정 → 앞뒤 0.5 s 확장 → 등속 구간 산출
+  function isoRegions(S, fs, aRaw) {
+    const c1 = butter2(1, fs), a1 = filtfilt(aRaw, c1);
+    const TH = 0.1, pad = Math.round(0.5 * fs);
+    const nz = a1.map(v => Math.abs(v) > TH);
+    const ext = nz.slice();
+    for (let i = 0; i < nz.length; i++) if (nz[i])
+      for (let k = Math.max(0, i-pad); k <= Math.min(nz.length-1, i+pad); k++) ext[k] = true;
+    let i0 = ext.indexOf(true), i3 = ext.lastIndexOf(true);
+    if (i0 < 0) return null;
+    // 비등속 블록 경계
+    const blocks = []; let st = -1;
+    for (let i = 0; i < ext.length; i++) {
+      if (ext[i] && st < 0) st = i;
+      if ((!ext[i] || i === ext.length-1) && st >= 0) { blocks.push([st, ext[i] ? i : i-1]); st = -1; }
+    }
+    const cv = (blocks.length >= 2) ? [blocks[0][1], blocks[blocks.length-1][0]] : null;
+    return { a1, i0, i3, blocks, cv };
+  }
+
+  function isoCalc(R) {
+    const S = R.S; if (!S || S.length < 64) return null;
+    const dur = S[S.length-1].t - S[0].t; if (dur <= 0) return null;
+    const fs = (S.length - 1) / dur;
+    const aRaw = S.map(p => p.ar), xRaw = S.map(p => p.xr || 0), yRaw = S.map(p => p.yr || 0);
+    const reg = isoRegions(S, fs, aRaw); if (!reg) return null;
+    const c10 = butter2(10, fs);
+    // 속도: 10 Hz 저역통과 신호 적분 (종료 시 v=0 조건으로 드리프트 제거)
+    const a10 = filtfilt(aRaw, c10);
+    const vv = new Array(S.length).fill(0);
+    for (let i = 1; i < S.length; i++) vv[i] = vv[i-1] + (a10[i] + a10[i-1]) / 2 * (S[i].t - S[i-1].t);
+    const bias = vv[vv.length-1] / dur;
+    for (let i = 0; i < vv.length; i++) vv[i] -= bias * (S[i].t - S[0].t);
+    let vMax = 0; for (const u of vv) vMax = Math.max(vMax, Math.abs(u));
+    // 저크: 경계 0~3 구간의 필터 가속도 미분 최대
+    let jMax = 0;
+    for (let i = Math.max(1, reg.i0); i <= Math.min(S.length-1, reg.i3); i++) {
+      const dt = S[i].t - S[i-1].t; if (dt <= 0) continue;
+      jMax = Math.max(jMax, Math.abs((a10[i] - a10[i-1]) / dt));
+    }
+    let aMax = 0, dMax = 0;
+    for (let i = reg.i0; i <= reg.i3; i++) { aMax = Math.max(aMax, reg.a1[i]); dMax = Math.min(dMax, reg.a1[i]); }
+    // 진동: 등속 구간에서 저주파(운동 성분) 제거 후 VPPV
+    const seg = reg.cv || [reg.i0, reg.i3];
+    const cut = butter2(1, fs);
+    const hi = arr => { const lo = filtfilt(arr, cut); return arr.map((v,i) => v - lo[i]); };
+    const slice = arr => arr.slice(seg[0], seg[1] + 1);
+    const z = vppv(hi(slice(aRaw))), xx = vppv(hi(slice(xRaw))), yy = vppv(hi(slice(yRaw)));
+    return { fs, z, x:xx, y:yy, vMax, jMax, aMax, dMax,
+      cvDur: S[seg[1]].t - S[seg[0]].t, full: !reg.cv };
+  }
+
+
+  // ================= 안티롤백 분석 =================
+  // 브레이크 개방 직후 ~ 의도된 가속 개시 직전 구간의 미소 거동을 분리해 정량화
+  function rollback(R) {
+    const S = R.S; if (!S || S.length < 128) return null;
+    const dur = S[S.length-1].t - S[0].t; if (dur <= 0) return null;
+    const fs = (S.length - 1) / dur;
+    const aRaw = S.map(p => p.ar);
+    // 1 Hz 2극 버터워스(순·역방향)는 0.3 s 내외의 짧은 롤백 펄스를 크게 감쇠시키므로
+    // 의도된 가속 구간만 남는다. 다만 위상 무지연 필터라 시점이 앞으로 번지므로
+    // 정확한 시각은 30 ms 이동평균(중심) 신호로 되짚어 확정한다.
+    const a1 = filtfilt(aRaw, butter2(1, fs));
+    let iOnA1 = -1;
+    for (let i = 0; i < a1.length; i++) if (Math.abs(a1[i]) > 0.1) { iOnA1 = i; break; }
+    if (iOnA1 < 0) return null;
+    // 정지 기준 구간
+    const q1 = Math.min(iOnA1 - Math.round(0.2 * fs), Math.round(1.0 * fs));
+    if (q1 < Math.round(0.4 * fs)) return { short:true };
+    let b0 = 0; for (let i = 0; i < q1; i++) b0 += aRaw[i]; b0 /= q1;
+    let sd = 0; for (let i = 0; i < q1; i++) sd += (aRaw[i]-b0)*(aRaw[i]-b0);
+    sd = Math.sqrt(sd / q1);
+    // 30 ms 중심 이동평균
+    const w = Math.max(1, Math.round(0.015 * fs));
+    const sm = new Array(S.length);
+    for (let i = 0; i < S.length; i++) {
+      let acc = 0, n = 0;
+      for (let k = Math.max(0, i-w); k <= Math.min(S.length-1, i+w); k++) { acc += aRaw[k] - b0; n++; }
+      sm[i] = acc / n;
+    }
+    const smSd = sd / Math.sqrt(2*w + 1);
+    // 의도된 가속 개시: a1 판정점에서 뒤로 되짚어 조용해지는 지점
+    const thrOn = Math.max(0.05, 6 * smSd);
+    let iOn = iOnA1;
+    while (iOn > q1 && Math.abs(sm[iOn]) > thrOn) iOn--;
+    // 브레이크 개방(최초 유의 거동)
+    const thrBr = Math.max(4 * smSd, 0.01);
+    let iBr = -1;
+    for (let i = q1; i < iOn; i++) if (Math.abs(sm[i]) > thrBr) { iBr = i; break; }
+    if (iBr < 0) return { none:true, sd, tOn:S[iOn].t - S[0].t };
+    // 개방 ~ 가속개시 구간 적분 (정지 구간 평균으로 바이어스 보정)
+    let v = 0, x = 0, vPk = 0, xPk = 0, xSgn = 0;
+    for (let i = iBr + 1; i <= iOn; i++) {
+      const dt = S[i].t - S[i-1].t; if (dt <= 0 || dt > 0.2) continue;
+      v += ((aRaw[i] - b0) + (aRaw[i-1] - b0)) / 2 * dt;
+      x += v * dt;
+      if (Math.abs(v) > Math.abs(vPk)) vPk = v;
+      if (Math.abs(x) > Math.abs(xPk)) { xPk = x; xSgn = Math.sign(x); }
+    }
+    const T = S[iOn].t - S[iBr].t;
+    const travel = Math.sign(S[S.length-1].s || 0);
+    // 변위 오차 추정: 잔류 바이어스 항(정지구간 평균의 표준오차) + 백색잡음 적분 항
+    const seBias = sd / Math.sqrt(q1);
+    const xNoise = 0.5 * seBias * T * T + sd * Math.sqrt(T / fs) * T / Math.sqrt(3);
+    let aPk = 0;
+    for (let i = iBr; i <= iOn; i++) if (Math.abs(sm[i]) > Math.abs(aPk)) aPk = sm[i];
+    // 그래프용 트레이스: 개방 0.5 s 전 ~ 가속개시 0.5 s 후
+    const w0 = Math.max(0, iBr - Math.round(0.5 * fs));
+    const w1 = Math.min(S.length - 1, iOn + Math.round(0.25 * fs));
+    const tr = { t:[], a:[], v:[], x:[] };
+    let vv = 0, xx = 0;
+    for (let i = w0; i <= w1; i++) {
+      if (i > w0) {
+        const dt = S[i].t - S[i-1].t;
+        if (dt > 0 && dt < 0.2) { vv += ((aRaw[i]-b0) + (aRaw[i-1]-b0)) / 2 * dt; xx += vv * dt; }
+      }
+      tr.t.push(S[i].t - S[0].t); tr.a.push(sm[i]); tr.v.push(vv * 1000); tr.x.push(xx * 1000);
+    }
+    return {
+      trace: tr,
+      tBr: S[iBr].t - S[0].t, tOn: S[iOn].t - S[0].t, T,
+      vPk, xPk, aPk, sd, xNoise, travel, dirSame: travel !== 0 && xSgn === travel,
+      valid: Math.abs(xPk) > 3 * xNoise
+    };
+  }
+  const rbDir = q => q.xPk === 0 ? '—' : (q.xPk > 0 ? '상승' : '하강') + (q.travel === 0 ? '' : q.dirSame ? ' (주행방향과 동일)' : ' (주행방향과 반대)');
+
+
+
+
+  // ================= ISO 2631-1 전신진동 주파수 가중 (Wk / Wd) =================
+  // 파라미터: Wk f1 .4 f2 100 f3 12.5 f4 12.5 Q4 .63 f5 2.37 Q5 .91 f6 3.35 Q6 .91
+  //           Wd f1 .4 f2 100 f3 2   f4 2    Q4 .63 (상승 스텝 없음)
+  // 각 s-영역 블록을 쌍선형 변환해 바이쿼드로 만들고 순·역방향 적용(위상 무지연)
+  function bilinear(b2, b1, b0, a2, a1, a0, fs) {
+    const K = 2 * fs, K2 = K * K;
+    const A0 = a2*K2 + a1*K + a0;
+    return {
+      b0: (b2*K2 + b1*K + b0) / A0,
+      b1: 2 * (b0 - b2*K2) / A0,
+      b2: (b2*K2 - b1*K + b0) / A0,
+      a1: 2 * (a0 - a2*K2) / A0,
+      a2: (a2*K2 - a1*K + a0) / A0
+    };
+  }
+  function wbvSections(fs, type) {
+    const P = type === 'Wk'
+      ? { f1:0.4, f2:100, f3:12.5, f4:12.5, Q4:0.63, f5:2.37, Q5:0.91, f6:3.35, Q6:0.91 }
+      : { f1:0.4, f2:100, f3:2,    f4:2,    Q4:0.63, f5:null };
+    // 쌍선형 변환의 주파수 왜곡 보정(pre-warping) — 낮은 샘플링에서 고주파 오차를 줄인다
+    const W = f => 2 * fs * Math.tan(Math.PI * f / fs);
+    const sec = [];
+    const w1 = W(P.f1), Q1 = Math.SQRT1_2;
+    sec.push(bilinear(1, 0, 0, 1, w1/Q1, w1*w1, fs));                       // Hh
+    // Hl(100 Hz)은 fs가 충분할 때만 넣는다. 낮은 fs에서 억지로 넣으면
+    // 차단주파수가 나이퀴스트 아래로 내려와 규격에 없는 감쇠가 생긴다.
+    if (fs > 260) { const w2 = W(P.f2); sec.push(bilinear(0, 0, w2*w2, 1, w2/Q1, w2*w2, fs)); }
+    const w3 = W(P.f3), w4 = W(P.f4);
+    sec.push(bilinear(0, w4*w4/w3, w4*w4, 1, w4/P.Q4, w4*w4, fs));          // Ht (a-v 전이)
+    if (P.f5) {
+      const w5 = W(P.f5), w6 = W(P.f6);
+      sec.push(bilinear(1, w5/P.Q5, w5*w5, 1, w6/P.Q6, w6*w6, fs));         // Hs (상승 스텝)
+    }
+    return sec;
+  }
+  function biq(arr, c) {
+    let x1=0, x2=0, y1=0, y2=0;
+    const o = new Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      const y = c.b0*v + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2;
+      x2 = x1; x1 = v; y2 = y1; y1 = y; o[i] = y;
+    }
+    return o;
+  }
+  // 가중 필터는 1회(인과)만 적용한다. 순·역 2회를 쓰면 진폭응답이 제곱되어 규격과 어긋난다.
+  // 시작 과도응답은 앞쪽 1 s 영패딩으로 흡수한 뒤 잘라낸다.
+  function wbv(arr, fs, type) {
+    const pad = Math.round(fs);
+    let y = new Array(pad).fill(0).concat(arr);
+    for (const c of wbvSections(fs, type)) y = biq(y, c);
+    return y.slice(pad);
+  }
+  const MG = 1 / 0.00980665;   // m/s² → milli-g
+
+  // 영교차점 peak-to-peak 목록 + 최대 발생 위치
+  function ppList(sig) {
+    const zc = [];
+    for (let i = 1; i < sig.length; i++)
+      if ((sig[i-1] < 0 && sig[i] >= 0) || (sig[i-1] >= 0 && sig[i] < 0)) zc.push(i);
+    const P = [];
+    for (let k = 0; k + 2 < zc.length; k++) {
+      let mx = -1e9, mn = 1e9, im = zc[k];
+      for (let i = zc[k]; i < zc[k+2]; i++) { if (sig[i] > mx) mx = sig[i]; if (sig[i] < mn) { mn = sig[i]; } }
+      for (let i = zc[k]; i < zc[k+2]; i++) if (Math.abs(sig[i]) === Math.max(Math.abs(mx), Math.abs(mn))) { im = i; break; }
+      if (mx > mn) P.push({ pp: mx - mn, i: im });
+    }
+    if (!P.length) return { max:0, a95:0, zp:0, iMax:0, n:0 };
+    const srt = P.map(x => x.pp).slice().sort((a,b) => a-b);
+    let best = P[0]; for (const x of P) if (x.pp > best.pp) best = x;
+    let zp = 0; for (const v of sig) zp = Math.max(zp, Math.abs(v));
+    return { max: best.pp, a95: srt[Math.floor(0.95*(srt.length-1))], zp, iMax: best.i, n: P.length };
+  }
+
+  // EVA-625 형식 3축 진동 파형 — ISO 2631-1 가중(Wk/Wd) 적용, 단위 milli(g)
+  function svgEva(R) {
+    const S = R.S; if (!S || S.length < 64) return '';
+    const dur = S[S.length-1].t - S[0].t; if (dur <= 0) return '';
+    const fs = (S.length - 1) / dur;
+    const seg = segments(S);
+    const c0 = seg ? seg.const[0] : 0, c1 = seg ? seg.const[1] : S.length - 1;
+    // 가중 신호 (milli-g)
+    const sig = {
+      x: wbv(S.map(p => (p.xr || 0) * MG), fs, 'Wd'),
+      y: wbv(S.map(p => (p.yr || 0) * MG), fs, 'Wd'),
+      z: wbv(S.map(p => p.ar * MG), fs, 'Wk')
+    };
+    const st = { x: ppList(sig.x), y: ppList(sig.y), z: ppList(sig.z) };
+    // 저크 구간(가감속) 최대 pk/pk — Z축
+    const jz = [];
+    for (let i = 0; i < S.length; i++) if (i < c0 || i > c1) jz.push(sig.z[i]);
+    const jzMax = jz.length > 16 ? ppList(jz).max : 0;
+    // 속도
+    let vMax = 0; const va = [];
+    for (const p of S) { vMax = Math.max(vMax, Math.abs(p.v)); va.push(Math.abs(p.v)); }
+    va.sort((a,b) => a-b);
+    const v95 = va[Math.floor(0.95 * (va.length - 1))];
+
+    const W = 900, L = 74, Rp = 52, TOP = 6, B = 30;
+    const PH = [104, 104, 104, 124];
+    const H = TOP + PH.reduce((a,b)=>a+b,0) + B, w = W - L - Rp;
+    const X = t => L + t / dur * w;
+    const stepN = Math.max(1, Math.ceil(S.length / 1100));
+    let g = '', y0 = TOP;
+    const panel = (h, label, range, draw, head, headR) => {
+      g += `<rect x="${L}" y="${y0}" width="${w}" height="${h}" fill="#fff" stroke="#000" stroke-width="0.8"/>`;
+      const mid = y0 + h / 2, Y = v => mid - v / range * (h / 2);
+      // 눈금
+      const ticks = range >= 20 ? [-20,-10,0,10,20] : range >= 10 ? [-10,-5,0,5,10] : [-range, -range/2, 0, range/2, range];
+      for (const tv of ticks) {
+        const yy = Y(tv);
+        if (tv !== 0 && Math.abs(tv) === range / 2)
+          g += `<line x1="${L}" y1="${yy}" x2="${L+w}" y2="${yy}" stroke="#000" stroke-dasharray="4 4" stroke-width="0.6"/>` +
+               `<text x="${L+w+4}" y="${yy+4}" font-size="11" fill="#000">${tv > 0 ? tv.toFixed(1) : tv.toFixed(1)}</text>`;
+        g += `<text x="${L-6}" y="${yy+4}" font-size="11" fill="#000" text-anchor="end">${tv}</text>`;
+      }
+      g += `<line x1="${L}" y1="${Y(0)}" x2="${L+w}" y2="${Y(0)}" stroke="#888" stroke-width="0.5"/>`;
+      // 존 경계
+      if (seg) for (const [ci, nm] of [[c0,'1'],[c1,'2']]) {
+        const xx = X(S[ci].t);
+        g += `<line x1="${xx}" y1="${y0}" x2="${xx}" y2="${y0+h}" stroke="#000" stroke-dasharray="3 3" stroke-width="0.6"/>`;
+      }
+      draw(Y);
+      if (head) g += `<text x="${L+8}" y="${y0+16}" font-size="12" fill="#000">${head}</text>`;
+      if (headR) g += `<text x="${L+w-8}" y="${y0+16}" font-size="12" fill="#000" text-anchor="end">${headR}</text>`;
+      g += `<text transform="translate(16,${mid}) rotate(-90)" font-size="13" text-anchor="middle" fill="#000">${label}</text>`;
+      y0 += h;
+    };
+    const line = (arr, Y, col, from, to) => {
+      let pts = '';
+      for (let i = from; i <= to; i += stepN) pts += `${X(S[i].t).toFixed(1)},${Y(arr[i]).toFixed(1)} `;
+      return `<polyline fill="none" stroke="${col}" stroke-width="0.9" points="${pts}"/>`;
+    };
+    const cross = (Y, i, v) => {
+      const cx = X(S[i].t), cy = Y(v);
+      return `<line x1="${cx-9}" y1="${cy}" x2="${cx+9}" y2="${cy}" stroke="#000" stroke-width="0.8"/>` +
+             `<line x1="${cx}" y1="${cy-12}" x2="${cx}" y2="${cy+12}" stroke="#000" stroke-width="0.8"/>`;
+    };
+    // 1) 속도
+    const vr = Math.max(0.5, vMax * 1.25);
+    panel(PH[0], 'Z Velocity m/s', vr, Y => {
+      let pts = '';
+      for (let i = 0; i < S.length; i += stepN) pts += `${X(S[i].t).toFixed(1)},${Y(S[i].v).toFixed(1)} `;
+      g += `<polyline fill="none" stroke="#0000cd" stroke-width="1.1" points="${pts}"/>`;
+    }, `Max Velocity: ${vMax.toFixed(2)}   V95: ${v95.toFixed(2)}`);
+    // 2) ISO X / Y / Z
+    const rng = (o, base) => { let r2 = base; while (o.zp * 1.1 > r2) r2 *= 2; return r2; };
+    panel(PH[1], 'ISO X', rng(st.x, 10), Y => {
+      g += line(sig.x, Y, '#00008b', 0, S.length-1) + cross(Y, st.x.iMax, sig.x[st.x.iMax]);
+    }, `Max Pk/Pk: ${st.x.max.toFixed(1)}   A95: ${st.x.a95.toFixed(1)}   0-Pk: ${st.x.zp.toFixed(1)}`);
+    panel(PH[2], 'ISO Y', rng(st.y, 10), Y => {
+      g += line(sig.y, Y, '#8b0000', 0, S.length-1) + cross(Y, st.y.iMax, sig.y[st.y.iMax]);
+    }, `Max Pk/Pk: ${st.y.max.toFixed(1)}   A95: ${st.y.a95.toFixed(1)}   0-Pk: ${st.y.zp.toFixed(1)}`);
+    panel(PH[3], 'ISO Z', rng(st.z, 20), Y => {
+      g += line(sig.z, Y, '#20b2aa', 0, Math.max(0, c0)) +
+           line(sig.z, Y, '#00008b', Math.max(0, c0), c1) +
+           line(sig.z, Y, '#20b2aa', c1, S.length-1) +
+           cross(Y, st.z.iMax, sig.z[st.z.iMax]);
+      if (seg) {
+        g += `<text x="${X(S[c0].t)+4}" y="${y0+PH[3]-6}" font-size="12" fill="#000">1</text>`;
+        g += `<text x="${X(S[c1].t)+4}" y="${y0+PH[3]-6}" font-size="12" fill="#000">2</text>`;
+      }
+    }, `Max Pk/Pk: ${st.z.max.toFixed(1)}   A95: ${st.z.a95.toFixed(1)}   0-Pk: ${st.z.zp.toFixed(1)}`,
+       jzMax ? `Jerk Zone Max Pk/Pk: ${jzMax.toFixed(1)}` : '');
+    // 시간축
+    const gs = dur > 30 ? 5 : dur > 12 ? 5 : 2;
+    for (let t = 0; t <= dur; t += gs)
+      g += `<text x="${X(t)}" y="${H-12}" font-size="12" fill="#000" text-anchor="middle">${t.toFixed(0)}</text>`;
+    g += `<text x="${L+w/2}" y="${H-1}" font-size="12" fill="#000" text-anchor="middle">Seconds</text>`;
+    g += `<text x="${L}" y="${TOP-0}" font-size="11" fill="#000">Units: milli(g)</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:#fff">${g}</svg>`;
+  }
+
+  function svgRollback(q) {
+    const tr = q.trace; if (!tr || tr.t.length < 4) return '';
+    const W = 760, H = 210, L = 46, Rp = 46, T = 14, B = 26;
+    const w = W-L-Rp, h = H-T-B, t0 = tr.t[0], t1 = tr.t[tr.t.length-1], dur = Math.max(t1-t0, 1e-3);
+    const X = t => L + (t - t0) / dur * w;
+    // 스케일은 롤백 구간(가속 개시 이전)만으로 정해 미소 거동이 묻히지 않게 한다
+    let aM = 0.05, xM = 0.5;
+    for (let i = 0; i < tr.t.length; i++) {
+      if (tr.t[i] > q.tOn) break;
+      aM = Math.max(aM, Math.abs(tr.a[i]));
+      xM = Math.max(xM, Math.abs(tr.x[i]), Math.abs(tr.v[i])/10);
+    }
+    const midA = T + h/2;
+    const clamp = y => Math.max(T, Math.min(T + h, y));
+    const YA = v => clamp(midA - v / (aM*1.15) * (h/2));
+    const YX = v => clamp(midA - v / (xM*1.15) * (h/2));
+    let g = `<line x1="${L}" y1="${midA}" x2="${L+w}" y2="${midA}" stroke="#c8ceda"/>`;
+    // 시간 눈금
+    const step = dur > 2 ? 0.5 : dur > 1 ? 0.2 : 0.1;
+    for (let t = Math.ceil(t0/step)*step; t <= t1; t += step)
+      g += `<line x1="${X(t)}" y1="${T}" x2="${X(t)}" y2="${T+h}" stroke="#eceff4"/><text x="${X(t)}" y="${H-8}" font-size="10" fill="#6b7383" text-anchor="middle">${t.toFixed(1)}</text>`;
+    // 경계
+    for (const [tt, lab, col] of [[q.tBr,'브레이크 개방','#d9534f'], [q.tOn,'가속 개시','#2b7fc4']]) {
+      g += `<line x1="${X(tt)}" y1="${T}" x2="${X(tt)}" y2="${T+h}" stroke="${col}" stroke-dasharray="4 3"/>`;
+      g += `<text x="${X(tt)+3}" y="${T+11}" font-size="10" fill="${col}">${lab}</text>`;
+    }
+    const poly = (arr, Y, col, dash) => {
+      let pts = '';
+      for (let i = 0; i < tr.t.length; i++) pts += `${X(tr.t[i]).toFixed(1)},${Y(arr[i]).toFixed(1)} `;
+      return `<polyline fill="none" stroke="${col}" stroke-width="1.5" ${dash?'stroke-dasharray="3 2"':''} points="${pts}"/>`;
+    };
+    g += poly(tr.v.map(u => u/10), YX, '#2b7fc4', true);
+    g += poly(tr.x, YX, '#1a9e6a', false);
+    g += poly(tr.a, YA, '#d99a1a', false);
+    // 축 라벨
+    g += `<text x="4" y="${T+10}" font-size="10" fill="#d99a1a">a ±${aM.toFixed(2)} m/s²</text>`;
+    g += `<text x="${W-4}" y="${T+10}" font-size="10" fill="#1a9e6a" text-anchor="end">x ±${xM.toFixed(1)} mm</text>`;
+    g += `<text x="${W-4}" y="${T+22}" font-size="10" fill="#2b7fc4" text-anchor="end">v ±${(xM*10).toFixed(0)} mm/s</text>`;
+    g += `<text x="${L}" y="${H-8}" font-size="10" fill="#6b7383">s</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+  }
+
+
+
+  // ================= 소음 측정 =================
+  // 폰 마이크는 절대 음압 교정이 되어 있지 않다. 여기서는 dBFS(A)를 산출하고,
+  // 사용자가 소음계와 비교해 입력한 오프셋을 더해 dB(A) 근사값으로 표기한다.
+  let audioCtx = null, micStream = null, srcNode = null, anaNode = null, nzTimer = 0;
+  const NFFT = 2048;
+  let nzBuf = null, nzWin = null, nzAw = null;
+
+  function aWeight(f) { // IEC 61672 A 특성 (해석식)
+    const f2 = f*f;
+    const num = 12194*12194 * f2*f2;
+    const den = (f2 + 20.6*20.6) * Math.sqrt((f2 + 107.7*107.7) * (f2 + 737.9*737.9)) * (f2 + 12194*12194);
+    return 20 * Math.log10(num / den) + 2.0;
+  }
+
+  async function nzStart(R) {
+    if (!$('noise').checked) return false;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation:false, noiseSuppression:false, autoGainControl:false
+      }});
+    } catch (e) { msg('마이크 권한이 없어 소음 측정을 건너뜁니다.', 'err'); return false; }
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    srcNode = audioCtx.createMediaStreamSource(micStream);
+    anaNode = audioCtx.createAnalyser();
+    anaNode.fftSize = NFFT;
+    srcNode.connect(anaNode);
+    const fs = audioCtx.sampleRate;
+    nzBuf = new Float32Array(NFFT);
+    nzWin = new Float32Array(NFFT);
+    for (let i = 0; i < NFFT; i++) nzWin[i] = 0.5 - 0.5 * Math.cos(2*Math.PI*i/(NFFT-1));
+    nzAw = new Float32Array(NFFT/2);
+    for (let k = 1; k < NFFT/2; k++) nzAw[k] = Math.pow(10, aWeight(k * fs / NFFT) / 10);
+    R.nz = []; R.nzFs = fs;
+    return true;
+  }
+  function nzSample(R, t) {
+    if (!anaNode) return;
+    anaNode.getFloatTimeDomainData(nzBuf);
+    const re = new Float64Array(NFFT), im = new Float64Array(NFFT);
+    for (let i = 0; i < NFFT; i++) re[i] = nzBuf[i] * nzWin[i];
+    fft(re, im);
+    let pA = 0, pZ = 0;
+    for (let k = 1; k < NFFT/2; k++) {
+      const amp = 2 * Math.hypot(re[k], im[k]) / (NFFT * 0.5);
+      const pw = amp * amp / 2;
+      pZ += pw; pA += pw * nzAw[k];
+    }
+    const dbfs = v => 10 * Math.log10(Math.max(v, 1e-14) / 0.5);
+    R.nz.push({ t, a: dbfs(pA), z: dbfs(pZ) });
+  }
+  function nzStop() {
+    if (nzTimer) { clearInterval(nzTimer); nzTimer = 0; }
+    try { srcNode && srcNode.disconnect(); } catch(_) {}
+    try { micStream && micStream.getTracks().forEach(tr => tr.stop()); } catch(_) {}
+    try { audioCtx && audioCtx.close(); } catch(_) {}
+    audioCtx = null; micStream = null; srcNode = null; anaNode = null;
+  }
+
+  // 구간별 소음 지표. Leq = 에너지 평균, Lmax = 125 ms(Fast) 평균의 최대, L95 = 하위 5 백분위
+  function noiseStats(R, t0, t1) {
+    if (!R.nz || R.nz.length < 4) return null;
+    const off = +($('ncal').value || 0);
+    const sel = R.nz.filter(p => p.t >= t0 && p.t <= t1);
+    if (sel.length < 4) return null;
+    let sum = 0; for (const p of sel) sum += Math.pow(10, p.a/10);
+    const leq = 10 * Math.log10(sum / sel.length) + off;
+    // Fast(125 ms) 평균
+    const win = Math.max(1, Math.round(0.125 / Math.max(0.02, (sel[sel.length-1].t - sel[0].t) / (sel.length-1))));
+    let lmax = -200;
+    for (let i = 0; i + win <= sel.length; i++) {
+      let e = 0; for (let k = i; k < i + win; k++) e += Math.pow(10, sel[k].a/10);
+      lmax = Math.max(lmax, 10 * Math.log10(e / win));
+    }
+    lmax += off;
+    const srt = sel.map(p => p.a).sort((a,b) => a-b);
+    const l95 = srt[Math.floor(0.05 * (srt.length-1))] + off;
+    const l10 = srt[Math.floor(0.90 * (srt.length-1))] + off;
+    return { leq, lmax, l95, l10, n: sel.length, off, unit: off === 0 ? 'dBFS(A)' : 'dB(A)' };
+  }
+  function noiseCv(R) {
+    const S = R.S; if (!S || !R.nz) return null;
+    const seg = segments(S);
+    const t0 = seg ? S[seg.const[0]].t : S[0].t, t1 = seg ? S[seg.const[1]].t : S[S.length-1].t;
+    const cv = noiseStats(R, t0, t1);
+    return { cv, all: noiseStats(R, S[0].t, S[S.length-1].t), cvSeg: !!seg };
+  }
+
+
+  // ================= 진동 이벤트 검출 (위치 표시용) =================
+  // 등속 구간에서 1 Hz 이상 성분이 임계값을 넘는 지점을 찾아 주행 위치(m)와 함께 반환
+  function vibEvents(R) {
+    const S = R.S; if (!S || S.length < 128) return null;
+    const dur = S[S.length-1].t - S[0].t; if (dur <= 0) return null;
+    const fs = (S.length - 1) / dur;
+    const seg = segments(S);
+    const i0 = seg ? seg.const[0] : 0, i1 = seg ? seg.const[1] : S.length - 1;
+    if (i1 - i0 < 64) return null;
+    const cut = butter2(1, fs);
+    const axes = [['ar','수직'], ['xr','전후'], ['yr','좌우']];
+    const hp = {}, sg = {};
+    for (const [k] of axes) {
+      // 전 구간에 대해 고역통과 → 검출 창 경계에서 필터 과도응답이 생기지 않게 한다
+      const raw = S.map(p => p[k] || 0);
+      const lo = filtfilt(raw, cut);
+      hp[k] = raw.map((v, i) => v - lo[i]);
+      // 임계값은 MAD 기반 robust σ — 충격 자체가 임계값을 밀어올리지 않는다
+      const win = hp[k].slice(i0, i1 + 1).map(Math.abs).sort((a,b) => a-b);
+      const mad = win[Math.floor(win.length/2)];
+      sg[k] = 1.4826 * mad;
+    }
+    const thr = {}; for (const [k] of axes) thr[k] = Math.max(6 * sg[k], 0.08);
+    const guard = Math.max(2, Math.round(0.3 * fs));
+    const ev = [];
+    let i = i0;
+    while (i <= i1) {
+      let hit = null;
+      for (const [k, nm] of axes) if (Math.abs(hp[k][i]) > thr[k]) { hit = true; break; }
+      if (!hit) { i++; continue; }
+      let bi = i, bv = 0, bk = null;
+      for (let j = i; j <= Math.min(i1, i + guard); j++)
+        for (const [k, nm] of axes) {
+          const v = Math.abs(hp[k][j]);
+          if (v > bv) { bv = v; bi = j; bk = { k, nm }; }
+        }
+      ev.push({ t: S[bi].t, s: S[bi].s, amp: bv, axis: bk.nm, ratio: bv / thr[bk.k] });
+      i = bi + guard;
+    }
+    let spacing = null;
+    if (ev.length >= 2) {
+      const d = []; for (let n = 1; n < ev.length; n++) d.push(Math.abs(ev[n].s - ev[n-1].s));
+      const srt = d.slice().sort((a,b) => a-b);
+      const med = srt[Math.floor(srt.length/2)];
+      let sum = 0; for (const x of d) sum += x;
+      spacing = { med, mean: sum / d.length, n: d.length };
+    }
+    return { ev, rms: sg, thr, spacing, cvSeg: !!seg, t0: S[i0].t, t1: S[i1].t };
+  }
+
+
+  // ================= 주파수 원인 추정 =================
+  // 회전 기인: 로프 이동거리에 대해 주기적 → λ_car = π·D / (로핑 × 차수)
+  // 공간 기인(레일·브래킷): 카 이동거리에 대해 주기적 → λ_car = 피치
+  function machSpec() {
+    const num = (id, d) => { const v = parseFloat($(id).value); return isFinite(v) && v > 0 ? v : d; };
+    return {
+      dia: num('p-dia', 0) / 1000,            // m
+      rope: +$('p-rope').value || 2,
+      gear: num('p-gear', 1),
+      pole: num('p-pole', 0),
+      rail: num('p-rail', 5),
+      brk: num('p-brk', 2.5)
+    };
+  }
+  function cruiseSpeed(R) {
+    const S = R.S, seg = segments(S);
+    const i0 = seg ? seg.const[0] : 0, i1 = seg ? seg.const[1] : S.length - 1;
+    let sum = 0, n = 0;
+    for (let i = i0; i <= i1; i++) { sum += Math.abs(S[i].v); n++; }
+    return n ? sum / n : 0;
+  }
+  function freqSources(R) {
+    const sp = spectrum(R, 'const', $('fax').value);
+    if (!sp || !sp.peaks.length) return null;
+    const v = cruiseSpeed(R); if (v < 0.05) return null;
+    const m = machSpec();
+    const cand = [];
+    if (m.dia > 0) {
+      const lamRev = Math.PI * m.dia / m.rope;      // 시브 1회전당 카 이동거리
+      for (let n = 1; n <= 4; n++) cand.push({ lam: lamRev / n, label: `시브 ${n}차 (불평형·편심)`, kind:'rot' });
+      if (m.pole > 0) {
+        const lamE = lamRev / (m.pole / 2 * m.gear); // 전기 1주기당 카 이동거리
+        cand.push({ lam: lamE, label:'모터 전기 1차 (코깅·역기전력 왜곡)', kind:'rot' });
+        cand.push({ lam: lamE / 6, label:'모터 6f_e (토크 리플)', kind:'rot' });
+        cand.push({ lam: lamE / 12, label:'모터 12f_e (토크 리플)', kind:'rot' });
+        cand.push({ lam: lamRev / (m.pole * m.gear), label:'슬롯·극 상호작용', kind:'rot' });
+      }
+      if (m.gear > 1.01) cand.push({ lam: lamRev / m.gear, label:'감속기 입력축 1차', kind:'rot' });
+    }
+    cand.push({ lam: m.rail, label:'레일 이음부', kind:'rail' });
+    cand.push({ lam: m.rail / 2, label:'레일 이음부 2차 고조', kind:'rail' });
+    cand.push({ lam: m.brk, label:'레일 브래킷 피치', kind:'rail' });
+
+    const ve = vibEvents(R);
+    const evLam = ve && ve.spacing ? ve.spacing.med : null;
+    // 잡음 수준 피크는 제외 (최대 피크의 10 % 또는 0.01 m/s² 미만)
+    const pmax = Math.max(...sp.peaks.map(x => x.a));
+    const useful = sp.peaks.filter(x => x.a >= Math.max(0.01, 0.1 * pmax));
+    const rows = (useful.length ? useful : sp.peaks.slice(0,1)).map(pk => {
+      const lam = v / pk.f;
+      let best = null;
+      for (const c of cand) {
+        const dev = Math.abs(lam - c.lam) / c.lam;
+        if (!best || dev < best.dev) best = { ...c, dev };
+      }
+      const tol = Math.max(0.08, 1.5 * sp.df / pk.f);
+      const hit = best && best.dev <= tol;
+      // λ가 겹치는 다른 후보가 있으면 구분 불가로 표기
+      let ambig = null;
+      if (best) for (const c of cand)
+        if (c.label !== best.label && Math.abs(c.lam - best.lam) / best.lam < 0.02) ambig = c.label;
+      const evMatch = evLam && Math.abs(lam - evLam) / evLam < 0.12;
+      return { f: pk.f, amp: pk.a, lam, best, hit, tol, evMatch, ambig };
+    });
+    return { rows, v, df: sp.df, fs: sp.fs, axis: sp.axis, seg: sp.seg, evLam, spec: m };
+  }
+
+  // ================= 측정 유효성 자동 판정 =================
+  // 반환: { verdict:'ok'|'warn'|'reject', issues:[{lv,msg}] }
+  function quality(R) {
+    const S = R.S; if (!S || S.length < 32) return { verdict:'reject', issues:[{lv:'reject', msg:'샘플 수 부족'}] };
+    const dur = S[S.length-1].t - S[0].t; if (dur <= 0) return { verdict:'reject', issues:[{lv:'reject', msg:'시간축 이상'}] };
+    const fs = (S.length - 1) / dur;
+    const iss = [];
+
+    // 1) 폰 자세 변화 — 기울면 중력이 수평축으로 새어나와 DC 성분이 생긴다 (1° ≈ 0.17 m/s²)
+    let mx = 0, my = 0;
+    for (const p of S) { mx += p.x || 0; my += p.y || 0; }
+    mx /= S.length; my /= S.length;
+    const tilt = Math.hypot(mx, my);
+    if (tilt > 0.15) iss.push({ lv:'reject', msg:`측정 중 폰 자세 변화 추정 (수평축 DC ${tilt.toFixed(2)} m/s² ≈ ${(Math.asin(Math.min(1,tilt/9.81))*180/Math.PI).toFixed(1)}° 기울기)` });
+    else if (tilt > 0.08) iss.push({ lv:'warn', msg:`수평축 DC ${tilt.toFixed(2)} m/s² — 고정이 느슨했을 수 있음` });
+
+    // 2) 드리프트 보정량 — 클수록 적분 신뢰도 저하
+    const b = Math.abs(R.bias || 0);
+    if (b > 0.05) iss.push({ lv:'reject', msg:`드리프트 보정량 과다 (${(b*1000).toFixed(0)} mm/s²)` });
+    else if (b > 0.02) iss.push({ lv:'warn', msg:`드리프트 보정량 ${(b*1000).toFixed(0)} mm/s²` });
+
+    // 3) 주행 자체가 없음
+    const net = Math.abs(S[S.length-1].s);
+    let vm = 0; for (const p of S) vm = Math.max(vm, Math.abs(p.v));
+    if (net < 0.1 || vm < 0.05) iss.push({ lv:'reject', msg:`주행이 검출되지 않음 (변위 ${net.toFixed(2)} m, 최대속도 ${vm.toFixed(2)} m/s)` });
+
+    // 4) 종료 시 정지 미확인 — v=0 보정 전제가 깨진다
+    const nEnd = Math.max(4, Math.round(0.5 * fs));
+    let ae = 0; for (let i = S.length - nEnd; i < S.length; i++) ae += Math.abs(S[i].a);
+    ae /= nEnd;
+    if (ae > 0.1) iss.push({ lv:'reject', msg:`종료 시점에 아직 주행 중 (마지막 0.5 s 평균 |a| ${ae.toFixed(2)} m/s²)` });
+
+    // 4b) 감속 구간 미검출 — 주행 중에 기록을 끊으면 마지막 감속이 없다
+    if (!segments(S)) iss.push({ lv:'reject', msg:'가속·등속·감속 구간을 분리하지 못함 (주행 중 기록을 끊었을 가능성)' });
+
+    // 5) 시작 시 정지 미확인 — 영점 오염
+    const nSt = Math.max(4, Math.round(0.3 * fs));
+    let m0 = 0; for (let i = 0; i < nSt; i++) m0 += S[i].a; m0 /= nSt;
+    let sd0 = 0; for (let i = 0; i < nSt; i++) sd0 += (S[i].a - m0) * (S[i].a - m0);
+    sd0 = Math.sqrt(sd0 / nSt);
+    if (Math.abs(m0) > 0.1 || sd0 > 0.1) iss.push({ lv:'warn', msg:`출발 전 정지 상태 불확실 (초기 0.3 s |a| ${Math.abs(m0).toFixed(2)}, σ ${sd0.toFixed(2)} m/s²)` });
+
+    // 6) 샘플 누락
+    let gaps = 0, dts = [];
+    for (let i = 1; i < S.length; i++) { const dt = S[i].t - S[i-1].t; dts.push(dt); if (dt > 0.2) gaps++; }
+    dts.sort((a,b2) => a-b2);
+    const med = dts[Math.floor(dts.length/2)];
+    let odd = 0; for (const d of dts) if (d > 2*med || d < 0.5*med) odd++;
+    if (gaps > 0) iss.push({ lv:'reject', msg:`데이터 공백 ${gaps}건 (0.2 s 초과)` });
+    else if (odd / dts.length > 0.05) iss.push({ lv:'warn', msg:`샘플 간격 불균일 ${(100*odd/dts.length).toFixed(0)}%` });
+    if (fs < 30) iss.push({ lv:'warn', msg:`샘플링 ${fs.toFixed(0)} Hz — 저크·스펙트럼 신뢰도 낮음` });
+
+    const verdict = iss.some(i => i.lv === 'reject') ? 'reject' : iss.length ? 'warn' : 'ok';
+    return { verdict, issues: iss, tilt, fs };
+  }
+  const VJ = { ok:'정상', warn:'주의', reject:'배제' };
+
+  // ---- 리포트 ----
+  const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function svgChart(S, seg, evs) {
+    const W = 760, H = 240, L = 46, Rp = 10, T = 12, B = 26, w = W-L-Rp, h = H-T-B, mid = T + h/2;
+    const step = Math.max(1, Math.ceil(S.length / 700));
+    const D = []; for (let i = 0; i < S.length; i += step) D.push(S[i]); D.push(S[S.length-1]);
+    const dur = S[S.length-1].t;
+    let am=.5, vm=.5, jm=.5;
+    for (const q of S) { am=Math.max(am,Math.abs(q.a)); vm=Math.max(vm,Math.abs(q.v)); jm=Math.max(jm,Math.abs(q.j)); }
+    const X = t => L + t/dur*w;
+    const poly = (k, sc, col) => `<polyline fill="none" stroke="${col}" stroke-width="1.4" points="${D.map(p=>X(p.t).toFixed(1)+','+(mid - p[k]/(sc*1.1)*(h/2)).toFixed(1)).join(' ')}"/>`;
+    let g = `<line x1="${L}" y1="${mid}" x2="${L+w}" y2="${mid}" stroke="#c8ceda"/>`;
+    for (let t = 0; t <= dur; t += dur > 30 ? 10 : dur > 12 ? 5 : 2)
+      g += `<line x1="${X(t)}" y1="${T}" x2="${X(t)}" y2="${T+h}" stroke="#eceff4"/><text x="${X(t)}" y="${H-8}" font-size="10" fill="#6b7383" text-anchor="middle">${t.toFixed(0)}</text>`;
+    if (seg) { for (const i of [seg.acc[0], seg.acc[1], seg.dec[0], seg.dec[1]]) g += `<line x1="${X(S[i].t)}" y1="${T}" x2="${X(S[i].t)}" y2="${T+h}" stroke="#9aa4b5" stroke-dasharray="3 3"/>`;
+      const lab=(a,b,t)=>`<text x="${(X(S[a].t)+X(S[b].t))/2}" y="${T+12}" font-size="10" fill="#6b7383" text-anchor="middle">${t}</text>`;
+      g += lab(seg.acc[0],seg.acc[1],'가속')+lab(seg.const[0],seg.const[1],'등속')+lab(seg.dec[0],seg.dec[1],'감속'); }
+    g += poly('j', jm, '#d9534f') + poly('v', vm, '#2b7fc4') + poly('a', am, '#d99a1a');
+    if (evs && evs.length) {
+      evs.forEach((e, n) => {
+        const x = X(e.t);
+        g += `<line x1="${x}" y1="${T}" x2="${x}" y2="${T+h}" stroke="#b03a2e" stroke-width="0.7" stroke-dasharray="2 3"/>`;
+        g += `<text x="${x}" y="${T+h+11}" font-size="9" fill="#b03a2e" text-anchor="middle">${n+1}</text>`;
+      });
+    }
+    g += `<text x="${L}" y="${H-8}" font-size="10" fill="#6b7383">s</text><text x="${L+w}" y="${H-8}" font-size="10" fill="#6b7383" text-anchor="end">a ±${am.toFixed(2)} m/s²  ·  v ±${vm.toFixed(2)} m/s  ·  j ±${jm.toFixed(1)} m/s³</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+  }
+  function buildReport() {
+    const meta = { site:$('m-site').value, unit:$('m-unit').value, spec:$('m-spec').value, by:$('m-by').value, addr:$('m-addr').value };
+    const list = [];
+    for (const dir of ['up','down']) for (let n = 1; n <= nTrials; n++) { const R = runs[dir+n]; if (R && R.S.length) list.push({ key:dir+n, dir, n, R }); }
+    if (!list.length) { msg('리포트에 포함할 측정 데이터가 없습니다.', 'err'); return; }
+    const f = x => x.toFixed(2);
+    for (const it of list) it.q = quality(it.R);
+    const good = list.filter(it => it.q.verdict !== 'reject');
+    let sum = '<table><tr><th>회차</th><th>a max</th><th>a min</th><th>v max</th><th>v min</th><th>j max</th><th>j min</th><th>주행시간</th><th>거리</th><th>fs</th><th>판정</th></tr>';
+    for (const it of list) { const o = stats(it.R.S), p = it.R.S[it.R.S.length-1];
+      const col = it.q.verdict === 'reject' ? '#b03a2e' : it.q.verdict === 'warn' ? '#a06a00' : '#1a7a4a';
+      sum += `<tr${it.q.verdict==='reject'?' style="color:#8a8f99"':''}><td>${DIR[it.dir]} ${it.n}회</td><td>${f(o.aMx)}</td><td>${f(o.aMn)}</td><td>${f(o.vMx)}</td><td>${f(o.vMn)}</td><td>${f(o.jMx)}</td><td>${f(o.jMn)}</td><td>${p.t.toFixed(1)} s</td><td>${f(p.s)} m</td><td>${it.R.fsEst.toFixed(0)} Hz</td><td style="color:${col}">${VJ[it.q.verdict]}</td></tr>`; }
+    sum += '</table>';
+    const rej = list.filter(it => it.q.verdict === 'reject');
+    if (rej.length || list.some(it => it.q.verdict === 'warn')) {
+      sum += '<p class="note"><b>자동 판정 사유</b><br>' + list.filter(it => it.q.issues.length)
+        .map(it => `${DIR[it.dir]} ${it.n}회 [${VJ[it.q.verdict]}] ` + it.q.issues.map(i => i.msg).join('; ')).join('<br>') + '</p>';
+    }
+    if (rej.length) sum += `<p class="note">배제 ${rej.length}건은 아래 방향별 평균에서 제외했습니다. 개별 상세는 그대로 수록합니다.</p>`;
+    // 방향별 평균/편차
+    let rep = '<table><tr><th>방향</th><th>회수</th><th>|v| max 평균</th><th>|a| max 평균</th><th>|j| max 평균</th><th>거리 평균</th></tr>';
+    for (const dir of ['up','down']) {
+      const g = good.filter(x => x.dir === dir); if (!g.length) continue;
+      const av = fn => g.reduce((t,x)=>t+fn(x),0)/g.length;
+      rep += `<tr><td>${DIR[dir]}</td><td>${g.length}</td><td>${f(av(x=>{const o=stats(x.R.S);return Math.max(Math.abs(o.vMx),Math.abs(o.vMn));}))}</td><td>${f(av(x=>{const o=stats(x.R.S);return Math.max(Math.abs(o.aMx),Math.abs(o.aMn));}))}</td><td>${f(av(x=>{const o=stats(x.R.S);return Math.max(Math.abs(o.jMx),Math.abs(o.jMn));}))}</td><td>${f(av(x=>x.R.S[x.R.S.length-1].s))}</td></tr>`;
+    }
+    rep += '</table>';
+    let isoTbl = '<table><tr><th>회차</th><th>VPPV 수직 max/A95</th><th>전후 max/A95</th><th>좌우 max/A95</th><th>최대 가속</th><th>최대 감속</th><th>최대 저크</th><th>최대 속도</th><th>등속 구간</th></tr>';
+    for (const it of list) {
+      const q = isoCalc(it.R);
+      if (!q) { isoTbl += `<tr><td>${DIR[it.dir]} ${it.n}회</td><td colspan="8" style="color:#6b7383">산출 불가</td></tr>`; continue; }
+      const g = (a,b) => `${a.toFixed(3)} / ${b.toFixed(3)}`;
+      isoTbl += `<tr><td>${DIR[it.dir]} ${it.n}회</td><td>${g(q.z.max,q.z.a95)}</td><td>${g(q.x.max,q.x.a95)}</td><td>${g(q.y.max,q.y.a95)}</td><td>${q.aMax.toFixed(2)}</td><td>${q.dMax.toFixed(2)}</td><td>${q.jMax.toFixed(2)}</td><td>${q.vMax.toFixed(2)}</td><td>${q.cvDur.toFixed(1)} s${q.full?'*':''}</td></tr>`;
+    }
+    isoTbl += '</table><p class="note">VPPV = 영교차점 사이 peak-to-peak 진동값(m/s²), 등속 구간 기준. A95 = 전체 VPPV의 95 백분위. 최대 가속·감속은 1 Hz 2극 버터워스, 속도는 10 Hz 저역통과 신호 적분. * 는 등속 구간을 분리하지 못해 전 구간으로 대체.</p>';
+    let nzTbl = '', anyNz = list.some(it => it.R.nz && it.R.nz.length > 4);
+    if (anyNz) {
+      nzTbl = '<table><tr><th>회차</th><th>구간</th><th>Leq</th><th>Lmax(Fast)</th><th>L10</th><th>L95</th><th>샘플</th></tr>';
+      for (const it of list) {
+        const nq = noiseCv(it.R); if (!nq || !nq.cv) continue;
+        const nm = `${DIR[it.dir]} ${it.n}회`;
+        const row = (lab, o) => o ? `<tr><td>${nm}</td><td>${lab}</td><td>${o.leq.toFixed(1)}</td><td>${o.lmax.toFixed(1)}</td><td>${o.l10.toFixed(1)}</td><td>${o.l95.toFixed(1)}</td><td>${o.n}</td></tr>` : '';
+        nzTbl += row(nq.cvSeg ? '등속' : '전체(등속 미분리)', nq.cv) + row('전체 주행', nq.all);
+      }
+      const off = +($('ncal').value || 0);
+      nzTbl += `</table><p class="note">단위 ${off === 0 ? 'dBFS(A) — 미보정 상대값' : `dB(A) (보정 오프셋 ${off.toFixed(1)} dB 적용)`}. A 특성은 IEC 61672 해석식을 FFT 빈별로 적용해 산출. Leq = 에너지 평균, Lmax = 125 ms(Fast) 평균의 최대, L10/L95 = 상위 10 / 하위 5 백분위. 스마트폰 마이크는 음압 교정·자유음장 보정이 되어 있지 않으므로 절대 음압 레벨이 아니라 상대 비교용입니다.</p>`;
+    }
+    let fsTbl = '', anyFs = false;
+    {
+      let t2 = '<table><tr><th>회차</th><th>피크 주파수</th><th>진폭</th><th>파장 λ = v/f</th><th>가장 가까운 후보</th><th>편차</th><th>추정</th></tr>';
+      for (const it of list) {
+        const q = freqSources(it.R); if (!q) continue;
+        anyFs = true;
+        q.rows.forEach((r2, n) => {
+          const est = !r2.best ? '—'
+            : r2.hit ? (r2.best.kind === 'rot' ? '회전 기인' : '레일·공간 기인') + (r2.evMatch ? ' · 충격 이벤트 간격과 일치' : '')
+            : '미상';
+          t2 += `<tr><td>${n === 0 ? `${DIR[it.dir]} ${it.n}회 (v ${q.v.toFixed(2)} m/s)` : ''}</td><td>${r2.f.toFixed(2)} Hz</td><td>${r2.amp.toFixed(3)}</td><td>${r2.lam.toFixed(3)} m</td><td>${r2.best ? r2.best.label + ` (λ ${r2.best.lam.toFixed(3)} m)` + (r2.ambig ? `<br><span style="color:#6b7383">구분 불가: ${r2.ambig}</span>` : '') : '—'}</td><td>${r2.best ? (r2.best.dev*100).toFixed(1) + ' %' : '—'}</td><td>${est}</td></tr>`;
+        });
+      }
+      t2 += '</table>';
+      const m = machSpec();
+      t2 += `<p class="note">판별 원리: 회전 기인 진동은 <b>로프 이동거리</b>에 대해 주기적이므로 카 기준 파장 λ = π·D / (로핑 × 차수)로 고정되고, 레일 이음부·브래킷은 <b>카 이동거리</b>에 대해 주기적이므로 λ = 설치 피치와 같습니다. 측정된 피크의 λ = v/f 를 두 계열과 대조해 추정합니다. 허용 편차는 8 % 또는 주파수 분해능 Δf의 1.5배 중 큰 값.</p>`;
+      t2 += `<p class="note">입력 제원: 시브 직경 ${m.dia > 0 ? (m.dia*1000).toFixed(0)+' mm' : '미입력'} · 로핑 ${m.rope}:1 · 감속비 ${m.gear} · 극수 ${m.pole || '미입력'} · 레일 ${m.rail} m · 브래킷 ${m.brk} m. 시브 직경과 극수를 입력하지 않으면 회전 계열 후보가 생성되지 않아 모두 레일 계열로만 대조됩니다.</p>`;
+      fsTbl = t2;
+    }
+    let rbTbl = '<table><tr><th>회차</th><th>개방 시점</th><th>가속 개시</th><th>롤백 구간</th><th>최대 변위</th><th>최대 속도</th><th>가속도 피크</th><th>방향</th><th>판정</th></tr>';
+    for (const it of list) {
+      const q = rollback(it.R);
+      const nm = `${DIR[it.dir]} ${it.n}회`;
+      if (!q) { rbTbl += `<tr><td>${nm}</td><td colspan="8" style="color:#6b7383">산출 불가</td></tr>`; continue; }
+      if (q.short) { rbTbl += `<tr><td>${nm}</td><td colspan="8" style="color:#6b7383">출발 전 정지 구간 부족</td></tr>`; continue; }
+      if (q.none) { rbTbl += `<tr><td>${nm}</td><td colspan="7" style="color:#6b7383">가속 개시 전 유의 거동 없음</td><td>양호</td></tr>`; continue; }
+      rbTbl += `<tr><td>${nm}</td><td>${q.tBr.toFixed(2)} s</td><td>${q.tOn.toFixed(2)} s</td><td>${(q.T*1000).toFixed(0)} ms</td><td>${(q.xPk*1000).toFixed(1)} mm</td><td>${(q.vPk*1000).toFixed(1)} mm/s</td><td>${q.aPk.toFixed(3)} m/s²</td><td>${rbDir(q)}</td><td>${q.valid ? '유의' : `잡음 이내 (±${(q.xNoise*1000).toFixed(1)} mm)`}</td></tr>`;
+    }
+    let rbFig = '';
+    for (const it of list) {
+      const q = rollback(it.R);
+      if (!q || q.short || q.none || !q.trace) continue;
+      rbFig += `<h4 style="font-size:13px;margin:14px 0 2px;color:#42506b">${DIR[it.dir]} ${it.n}회 — 개방 구간 확대</h4>${svgRollback(q)}
+        <p class="note">변위 ${(q.xPk*1000).toFixed(1)} mm · 속도 ${(q.vPk*1000).toFixed(1)} mm/s · 구간 ${(q.T*1000).toFixed(0)} ms · ${rbDir(q)} · ${q.valid ? '유의' : `잡음 이내 (±${(q.xNoise*1000).toFixed(1)} mm)`}</p>`;
+    }
+    rbTbl += '</table><p class="note">브레이크 개방 시점 = 정지 구간 잡음의 4σ를 처음 초과한 시점, 가속 개시 = 1 Hz 필터 가속도가 0.1 m/s²를 처음 초과한 시점. 두 시점 사이를 정지 구간 평균으로 바이어스 보정한 뒤 적분해 변위·속도를 산출. 부호 +는 상승 방향. 판정의 잡음 한계는 잔류 바이어스 항(0.5·SE·T²)과 백색잡음 적분 항(σ·√(T/fs)·T/√3)의 합으로 추정했으며, 이를 3배 이상 초과할 때만 유의로 표기.</p>';
+    let body = '';
+    for (const it of list) {
+      const S = it.R.S, o = stats(S), p = S[S.length-1], seg = segments(S);
+      let fftTbl = '<table><tr><th>축 · 구간</th><th>길이</th><th>fs</th><th>Δf</th><th>피크 1</th><th>피크 2</th><th>피크 3</th></tr>';
+      for (const axk of ['ar','xr','yr']) for (const w of ['acc','const','dec']) {
+        const sp = spectrum(it.R, w, axk); if (!sp) continue;
+        if (axk !== 'ar' && sp.peaks.length === 0) continue;
+        const pk = i => sp.peaks[i] ? `${sp.peaks[i].f.toFixed(2)} Hz / ${sp.peaks[i].a.toFixed(3)}` : '—';
+        fftTbl += `<tr><td>${sp.axis} · ${sp.seg}${sp.fallback?'*':''}</td><td>${sp.dur.toFixed(1)} s</td><td>${sp.fs.toFixed(0)} Hz</td><td>${sp.df.toFixed(2)} Hz</td><td>${pk(0)}</td><td>${pk(1)}</td><td>${pk(2)}</td></tr>`;
+      }
+      fftTbl += '</table><p class="note">피크 = 주파수 / 진폭(m/s²), 원시 가속도 기준. * 표시는 구간 샘플 부족으로 전체 구간 대체.</p>';
+      const ve = vibEvents(it.R);
+      const evList = ve ? ve.ev : [];
+      body += `<section><h3>${DIR[it.dir]} ${it.n}회 <span style="font-size:12px;font-weight:400;color:${it.q.verdict==='reject'?'#b03a2e':it.q.verdict==='warn'?'#a06a00':'#1a7a4a'}">[${VJ[it.q.verdict]}]</span></h3>${it.q.issues.length ? `<p class="note">${it.q.issues.map(i => i.msg).join(' · ')}</p>` : ''}${svgChart(S, seg, evList)}
+        <table><tr><th>항목</th><th>max</th><th>min</th></tr>
+        <tr><td>가속도 (m/s²)</td><td>${f(o.aMx)}</td><td>${f(o.aMn)}</td></tr>
+        <tr><td>속도 (m/s)</td><td>${f(o.vMx)}</td><td>${f(o.vMn)}</td></tr>
+        <tr><td>저크 (m/s³)</td><td>${f(o.jMx)}</td><td>${f(o.jMn)}</td></tr>
+        ${(() => { const hz = horizStats(S); return hz ? `<tr><td>수평 전후 (m/s²)</td><td>${f(hz.xMx)}</td><td>${f(hz.xMn)}</td></tr><tr><td>수평 좌우 (m/s²)</td><td>${f(hz.yMx)}</td><td>${f(hz.yMn)}</td></tr><tr><td>저크 전후 (m/s³)</td><td>${f(axStats(S,'jx').mx)}</td><td>${f(axStats(S,'jx').mn)}</td></tr><tr><td>저크 좌우 (m/s³)</td><td>${f(axStats(S,'jy').mx)}</td><td>${f(axStats(S,'jy').mn)}</td></tr>` : ''; })()}</table>
+        ${(() => { const hz = horizStats(S); return hz ? `<p class="note">수평 진동 전후 p-p ${hz.xpp.toFixed(3)} · rms ${hz.xrms.toFixed(3)} / 좌우 p-p ${hz.ypp.toFixed(3)} · rms ${hz.yrms.toFixed(3)} m/s²</p>` : ''; })()}
+        <p class="note">주행 시간 ${p.t.toFixed(1)} s · 이동 거리 ${f(p.s)} m · 샘플 ${S.length} @ ${it.R.fsEst.toFixed(0)} Hz · 드리프트 보정 ${it.R.src ? '(파일)' : it.R.bias==null ? '—' : (it.R.bias*1000).toFixed(1)+' mm/s²'}</p>
+        <h4 style="font-size:13px;margin:14px 0 2px;color:#42506b">3축 진동 파형 (ISO 2631-1 가중, milli-g)</h4>
+        ${svgEva(it.R)}
+        <p class="note">ISO 2631-1 전신진동 가중 적용 — 수직 z는 Wk, 수평 x·y는 Wd. 단위 milli(g), 1 mg = 0.00981 m/s². Max Pk/Pk는 영교차점 사이 peak-to-peak의 최대, A95는 그 95 백분위, 0-Pk는 최대 절댓값. 점선 1·2는 등속 구간 경계이며 Z축의 청록 구간이 가감속(저크) 구간입니다. 가중 필터는 쌍선형 변환(pre-warping 적용) 후 인과 1회 적용했고, 샘플링 200 Hz에서 규격 표 대비 편차는 25 Hz까지 1.0 dB 이내, 60 Hz 샘플링에서는 20 Hz 부근 최대 3.5 dB입니다.</p>
+        ${(() => {
+          if (!ve || !evList.length) return ve ? '<p class="note">등속 구간에서 임계값을 넘는 진동 이벤트가 검출되지 않았습니다.</p>' : '';
+          let h2 = `<p class="note"><b>진동 이벤트 위치</b> — 등속 구간${ve.cvSeg?'':'(전체 대체)'} 1 Hz 이상 성분이 임계값(축별 robust σ(MAD)의 6배, 최소 0.08 m/s²)을 넘는 지점. 그래프 위 번호와 대응.</p>`;
+          h2 += '<table><tr><th>#</th><th>위치 (m)</th><th>시각 (s)</th><th>축</th><th>피크 (m/s²)</th><th>임계 대비</th></tr>';
+          evList.forEach((e, n) => { h2 += `<tr><td>${n+1}</td><td>${e.s.toFixed(2)}</td><td>${e.t.toFixed(2)}</td><td>${e.axis}</td><td>${e.amp.toFixed(3)}</td><td>${e.ratio.toFixed(1)}배</td></tr>`; });
+          h2 += '</table>';
+          if (ve.spacing) h2 += `<p class="note">이벤트 간 거리 중앙값 ${ve.spacing.med.toFixed(2)} m · 평균 ${ve.spacing.mean.toFixed(2)} m (${ve.spacing.n}구간). 가이드레일 이음부 피치와 대조해 보십시오.</p>`;
+          h2 += `<p class="note">임계값 수직 ${ve.thr.ar.toFixed(3)} · 전후 ${ve.thr.xr.toFixed(3)} · 좌우 ${ve.thr.yr.toFixed(3)} m/s² (등속 구간 robust σ 수직 ${ve.rms.ar.toFixed(3)} · 전후 ${ve.rms.xr.toFixed(3)} · 좌우 ${ve.rms.yr.toFixed(3)})</p>`;
+          return h2;
+        })()}
+        ${fftTbl}</section>`;
+    }
+    const now = new Date();
+    const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>승강기 주행 계측 리포트</title><style>
+      body{font-family:system-ui,"Noto Sans KR",sans-serif;color:#1b2029;max-width:840px;margin:0 auto;padding:24px 18px 60px;line-height:1.55}
+      h1{font-size:21px;margin:0 0 4px} h3{font-size:16px;margin:26px 0 8px;padding-bottom:4px;border-bottom:2px solid #1b2029}
+      h2{font-size:15px;margin:22px 0 6px;color:#42506b}
+      table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0 4px;font-variant-numeric:tabular-nums}
+      th,td{border:1px solid #d5dae3;padding:5px 7px;text-align:right} th{background:#f2f4f8;font-weight:600} td:first-child,th:first-child{text-align:left}
+      .note{font-size:11.5px;color:#6b7383;margin:4px 0 0}
+      .hdr{font-size:12.5px;color:#42506b;margin:0 0 14px}
+      svg{border:1px solid #e3e7ee;border-radius:6px;background:#fff;margin:4px 0}
+      .lg{font-size:11.5px;color:#6b7383;margin:2px 0 8px}
+      .lg i{display:inline-block;width:13px;height:3px;vertical-align:middle;margin:0 4px 0 10px}
+      button{position:fixed;right:16px;bottom:16px;padding:12px 18px;border:0;border-radius:10px;background:#1b2029;color:#fff;font-size:14px;font-family:inherit}
+      @media print{button{display:none} section{break-inside:avoid}}
+      </style></head><body>
+      <h1>승강기 주행 계측 리포트</h1>
+      <p class="hdr">현장 ${esc(meta.site)||'—'} · 호기/기종 ${esc(meta.unit)||'—'} · 사양 ${esc(meta.spec)||'—'}<br>
+      ${meta.addr ? '주소 '+esc(meta.addr)+'<br>' : ''}
+      ${geo ? `위치 ${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)} (±${geo.acc.toFixed(0)} m) · <a href="https://www.google.com/maps?q=${geo.lat},${geo.lon}">지도</a><br>` : ''}
+      측정자 ${esc(meta.by)||'—'} · 작성 ${now.toLocaleString('ko-KR')}</p>
+      <h2>1. 전 회차 측정값</h2>${sum}
+      <h2>2. 방향별 평균 (배제 건 제외)</h2>${rep}
+      <h2>3. ISO 18738 산출값 (참고)</h2>${isoTbl}
+      ${anyFs ? `<h2>4. 주파수 원인 추정 (참고)</h2>${fsTbl}` : ''}
+      ${anyNz ? `<h2>${anyFs ? 5 : 4}. 소음 측정 (참고)</h2>${nzTbl}` : ''}
+      <h2>${4 + (anyFs?1:0) + (anyNz?1:0)}. 안티롤백 분석 (참고)</h2>${rbTbl}
+      <p class="lg"><i style="background:#d99a1a"></i>가속도<i style="background:#1a9e6a"></i>변위(mm)<i style="background:#2b7fc4"></i>속도(mm/s, 1/10 스케일)</p>
+      ${rbFig}
+      <h2>${5 + (anyFs?1:0) + (anyNz?1:0)}. 회차별 상세</h2>
+      <p class="lg"><i style="background:#d99a1a"></i>가속도<i style="background:#2b7fc4"></i>속도<i style="background:#d9534f"></i>저크</p>
+      ${body}
+      <p class="note" style="margin-top:22px">측정: 스마트폰 3축 가속도계, 정지 시 중력벡터에 투영한 연직 성분. 수평 2축은 보정 시 정한 수평면 직교 기저에 투영(전후 = 기기 세로축의 수평 성분, 좌우 = 그 직교축). 가속도·수평 ${$('fc').value} Hz / 저크 ${$('jfc').value} Hz 2단 저역통과. 속도·거리는 사다리꼴 적분 후 종료 시 v=0 조건으로 선형 드리프트 보정. FFT는 필터 전 원시 가속도에 Hann 윈도우 적용.
+ISO 18738 항목은 규격의 산출 절차(영교차점 VPPV, 1 Hz 버터워스 구간 판정, 10 Hz 적분 속도)를 따르되 주파수 가중은 적용하지 않았고, 스마트폰 센서로 측정했으므로 규격의 계측기 요구사항은 충족하지 않습니다. 참고값입니다.</p>
+      <button onclick="print()">인쇄 / PDF 저장</button></body></html>`;
+    const fname = `ride_report_${(meta.unit||'unit').replace(/\s+/g,'')}_${now.toISOString().slice(0,10)}.html`;
+    const blob = new Blob([html], {type:'text/html'});
+    lastReport = { blob, fname, meta, n:list.length, date:now };
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000);
+    $('mail').disabled = false;
+    msg(`리포트 생성 (${list.length}건). 메일로 보내려면 아래 '메일 전송'을 누르세요.`, 'ok');
+  }
+
+  // ================= 리포트 메일 전송 =================
+  // 정적 웹앱은 서버가 없어 무인 발송이 불가능하다. 파일이 첨부된 상태로 메일 앱을 띄운다.
+  let lastReport = null;
+  function mailSubject(r) {
+    const d = r.date.toISOString().slice(0,10);
+    return `[승강기 주행계측] ${r.meta.site || '현장'} ${r.meta.unit || ''} ${d}`.replace(/\s+/g,' ').trim();
+  }
+  function mailBody(r) {
+    const L = [];
+    L.push('승강기 주행 계측 리포트를 보냅니다.');
+    L.push('');
+    L.push(`현장: ${r.meta.site || '—'}`);
+    L.push(`호기/기종: ${r.meta.unit || '—'}`);
+    L.push(`사양: ${r.meta.spec || '—'}`);
+    if (r.meta.addr) L.push(`주소: ${r.meta.addr}`);
+    if (geo) L.push(`위치: ${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)} (±${geo.acc.toFixed(0)} m)`);
+    L.push(`측정자: ${r.meta.by || '—'}`);
+    L.push(`측정 회차: ${r.n}건`);
+    L.push(`작성: ${r.date.toLocaleString('ko-KR')}`);
+    L.push('');
+    L.push('첨부된 HTML 파일을 브라우저로 열면 표와 그래프를 볼 수 있고, 인쇄 → PDF 저장이 가능합니다.');
+    return L.join('\n');
+  }
+  async function mailReport() {
+    if (!lastReport) { msg('먼저 리포트를 생성하세요.', 'err'); return; }
+    const r = lastReport;
+    const to = ($('m-mail').value || '').trim();
+    const sub = mailSubject(r), body = mailBody(r);
+    // 1순위: 파일 공유 (Gmail·아웃룩·카톡 등으로 첨부 전달)
+    try {
+      const file = new File([r.blob], r.fname, { type:'text/html' });
+      if (navigator.canShare && navigator.canShare({ files:[file] })) {
+        await navigator.share({ files:[file], title: sub, text: body });
+        msg('공유 시트로 전달했습니다.', 'ok');
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') { msg('전송을 취소했습니다.'); return; }
+    }
+    // 2순위: 메일 앱만 열고 첨부는 수동 (mailto 는 첨부를 지원하지 않는다)
+    const href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(sub)}&body=${encodeURIComponent(body + '\n\n※ 다운로드된 리포트 파일을 첨부해 주세요.')}`;
+    location.href = href;
+    msg('메일 앱을 열었습니다. mailto 방식은 첨부를 지원하지 않으니 다운로드한 리포트 파일을 직접 첨부하세요.');
+  }
+  $('mail').onclick = mailReport;
+
+  $('report').onclick = buildReport;
+
+
+  // ================= 음성 명령 =================
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, micOn = false;
+  const NUM = { '일':1, '하나':1, '첫':1, '이':2, '둘':2, '두':2, '삼':3, '셋':3, '세':3, '사':4, '넷':4, '네':4, '오':5, '다섯':5 };
+
+  function voiceCmd(raw) {
+    const t = raw.replace(/\s+/g, '');
+    let done = null;
+    // 방향
+    if (/상승|올라|업/.test(t)) { cur = { dir:'up', n:cur.n }; done = '상승 탭'; }
+    if (/하강|내려|다운/.test(t)) { cur = { dir:'down', n:cur.n }; done = '하강 탭'; }
+    // 회차
+    const m = t.match(/([1-5일이삼사오하나둘두셋세넷네다섯첫])\s*(회|번)/);
+    if (m) {
+      const n = /[1-5]/.test(m[1]) ? +m[1] : NUM[m[1]];
+      if (n && n <= nTrials) { cur = { dir:cur.dir, n }; done = (done ? done + ' · ' : '') + n + '회'; }
+    }
+    // 동작
+    if (/취소|폐기|버려|무효/.test(t)) { if (recKey) { abortRec(); return '측정 취소'; } }
+    if (/정지|멈춰|멈춤|스톱|그만|종료/.test(t)) { if (recKey) { finish(false); return '정지'; } }
+    if (/시작|출발|기록|측정/.test(t)) { if (!recKey) { refreshUI(); start(); return (done ? done + ' · ' : '') + '시작'; } }
+    if (/초기화|리셋|지워/.test(t)) { reset(); return '초기화'; }
+    if (/리포트|보고서/.test(t)) { buildReport(); return '리포트'; }
+    if (/저장|씨에스브이|시에스브이/.test(t)) { exportCsv(); return 'CSV 저장'; }
+    if (/스펙트럼|주파수/.test(t)) { setView('fft'); return '스펙트럼'; }
+    if (/시간|파형|그래프/.test(t)) { setView('time'); return '시간 그래프'; }
+    if (/수직/.test(t)) { $('axis').value = 'v'; $('axis').onchange(); return '수직 축'; }
+    if (/전후|앞뒤/.test(t)) { $('axis').value = 'x'; $('axis').onchange(); return '전후 축'; }
+    if (/좌우|옆/.test(t)) { $('axis').value = 'y'; $('axis').onchange(); return '좌우 축'; }
+    if (done) { refreshUI(); return done; }
+    return null;
+  }
+
+  function micToggle() {
+    if (!SR) { msg('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장).', 'err'); return; }
+    if (micOn) { micOn = false; try { rec.stop(); } catch(_) {} rec = null; setMicUI(); msg('음성 명령을 껐습니다.'); return; }
+    rec = new SR();
+    rec.lang = 'ko-KR'; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 3;
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        let hit = null, said = '';
+        for (let k = 0; k < e.results[i].length; k++) {
+          said = e.results[i][k].transcript;
+          hit = voiceCmd(said);
+          if (hit) break;
+        }
+        if (hit) { msg(`🎤 ${hit}`, 'ok'); if (navigator.vibrate) navigator.vibrate(40); }
+        else msg(`🎤 "${said}" — 인식되지 않는 명령`);
+      }
+    };
+    rec.onerror = ev => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        micOn = false; setMicUI(); msg('마이크 권한이 거부되었습니다.', 'err');
+      } else if (ev.error === 'network') {
+        msg('음성 인식 서버에 연결하지 못했습니다 (승강로 안에서는 전파가 약할 수 있습니다).', 'err');
+      }
+    };
+    rec.onend = () => { if (micOn) { try { rec.start(); } catch(_) {} } };
+    try { rec.start(); micOn = true; setMicUI(); msg('음성 명령 켜짐 — "상승 일회 시작", "정지", "리포트" 처럼 말하세요.', 'ok'); }
+    catch (e) { micOn = false; setMicUI(); msg('음성 인식 시작 실패: ' + e.message, 'err'); }
+  }
+  function setMicUI() {
+    $('mic').classList.toggle('on', micOn);
+    $('mic').textContent = micOn ? '🎤 음성\n켜짐' : '🎤 음성\n꺼짐';
+  }
+  $('mic').onclick = micToggle;
+
+  document.querySelectorAll('.tab').forEach(b => b.onclick = () => { cur = {dir:b.dataset.dir, n:cur.n}; refreshUI(); });
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setView(b.dataset.view));
+  document.querySelectorAll('.lg').forEach(b => b.onclick = () => { const k = b.dataset.tr; show[k] = !show[k]; b.classList.toggle('on', show[k]); draw(); });
+  $('fseg').onchange = draw; $('fax').onchange = draw;
+  $('axis').onchange = () => {
+    const ax = $('axis').value;
+    show.a = ax === 'v'; show.v = ax === 'v'; show.j = ax === 'v';
+    show.x = ax === 'x'; show.y = ax === 'y';
+    document.querySelectorAll('.lg').forEach(b => b.classList.toggle('on', !!show[b.dataset.tr]));
+    if (ax !== 'v') $('fax').value = ax === 'x' ? 'xr' : 'yr'; else $('fax').value = 'ar';
+    refreshUI();
+  };
+  $('load').onclick = () => $('file').click();
+  $('file').onchange = e => { if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ''; };
+  $('go').onclick = start; $('reset').onclick = reset; $('csv').onclick = exportCsv;
+  addEventListener('resize', draw);
+  addEventListener('orientationchange', () => setTimeout(draw, 250));
+
+  // ================= 자동 업데이트 =================
+  // 서비스 워커로 오프라인 동작 + 새 버전 감지. 코드가 배포되면 다음 실행에서 배너가 뜬다.
+  let swReg = null;
+  async function initUpdate() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+      swReg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+      const show = () => {
+        if (recKey) return;   // 측정 중에는 방해하지 않는다
+        $('upd').style.display = 'flex';
+      };
+      if (swReg.waiting) show();
+      swReg.addEventListener('updatefound', () => {
+        const nw = swReg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) show();
+        });
+      });
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading) return; reloading = true; location.reload();
+      });
+      $('updBtn').onclick = () => {
+        $('updBtn').textContent = '적용 중…';
+        if (swReg.waiting) swReg.waiting.postMessage('skipWaiting');
+        else location.reload();
+      };
+      // 앱을 다시 열거나 포그라운드로 돌아올 때마다 새 버전 확인
+      const check = () => { if (!recKey) swReg.update().catch(() => {}); };
+      setInterval(check, 30 * 60 * 1000);
+      addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+      check();
+      // 배포 버전 표기
+      try {
+        const r = await fetch('version.json', { cache: 'no-store' });
+        const v = await r.json();
+        if (v.version && !/^__/.test(v.version)) $('ver').textContent = `${v.version} · ${v.built || ''}`;
+      } catch (_) {}
+    } catch (_) {}
+  }
+  initUpdate();
+
+  load(); loadMeta(); buildTrials(); refreshUI(); setMicUI(); msg(IDLE_MSG);
+})();
+</script>
+</body>
+</html>
