@@ -38,7 +38,12 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build release APK
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          VER="${GITHUB_REF_NAME}"
+          case "$VER" in v*) ;; *) VER="dev-${GITHUB_SHA::7}" ;; esac
+          CODE=$(( $(date -u +%s) / 60 ))
+          echo "versionName=$VER versionCode=$CODE"
+          gradle assembleRelease --no-daemon --stacktrace -PverName="$VER" -PverCode="$CODE"
 
       - name: Rename APK
         run: |
